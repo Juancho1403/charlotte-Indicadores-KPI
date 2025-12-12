@@ -17,8 +17,8 @@ app.get('/api', (req, res) => {
   res.json({ up: true });
 });
 
-// Montar rutas de ejemplo
-app.use('/api/example', exampleRoutes);
+// Montar rutas de KPI
+import kpiRoutes from './routes/main.route.js';
 app.use('/api/v1/kpi', kpiRoutes);
 
 // Iniciar servidor
@@ -40,5 +40,3 @@ const gracefulShutdown = async () => {
 
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
-
-
