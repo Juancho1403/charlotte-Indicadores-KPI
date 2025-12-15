@@ -2,7 +2,6 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import { envs } from './config/envs.js';
 import exampleRoutes from './routes/example/example.routes.js';
-import kpiRoutes from './routes/kpi/index.js';
 import morgan from 'morgan';
 
 const app = express();
