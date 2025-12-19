@@ -1,7 +1,7 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
-  output          = "../src/generated/prisma"
+  
 }
 
 datasource db {
@@ -32,16 +32,26 @@ enum KpiSeverity {
 // --------------------------------------------------------
 
 // 2.1 Metas Financieras
-model KpiMeta {
-  idMeta        Int      @id @default(autoincrement()) @map("id_meta")
-  nombre        String   @db.VarChar(100)
-  montoObjetivo Decimal  @map("monto_objetivo") @db.Decimal(12, 2)
-  fechaInicio   DateTime @map("fecha_inicio") @db.Date
-  fechaFin      DateTime @map("fecha_fin") @db.Date
-  activa        Boolean  @default(true)
-  createdAt     DateTime @default(now()) @map("created_at")
+model kpi_metas {
+  id            Int      @id @default(autoincrement())
+  nombre        String
+  descripcion   String?
+  objetivo      Float
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+  kpi_report_jobs kpi_report_jobs[]
+}
 
-  @@map("kpi_metas")
+model kpi_report_jobs {
+  id            Int      @id @default(autoincrement())
+  kpiMetaId     Int
+  fecha         DateTime
+  valor         Float
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  // Relación con kpi_metas
+  kpi_metas     kpi_metas @relation(fields: [kpiMetaId], references: [id])
 }
 
 // 2.2 Reglas de Semáforo
