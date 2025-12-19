@@ -15,7 +15,9 @@
     "@prisma/adapter-pg": "^6.9.0",
     "@prisma/client": "6.9.0",
     "body-parser": "2.2.0",
+    "bullmq": "^5.66.1",
     "express": "5.1.0",
+    "ioredis": "^5.8.2",
     "morgan": "^1.10.1",
     "zod": "^4.1.13"
   },
