@@ -102,3 +102,27 @@ model KpiAuditoriaExport {
 
   @@map("kpi_auditoria_export")
 }
+
+//2.6 Historial de Calculos(kpi_calc_history)
+model kpi_calc_history {
+  id                Int      @id @default(autoincrement())
+  kpi_id            Int
+  calculation_date  DateTime
+  result            Float
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@map("kpi_calc_history")
+}
+
+//2.7 Valores Atipicos Calculo (kpi_calc_outliers)
+model kpi_calc_outliers {
+  id                Int      @id @default(autoincrement())
+  kpi_id            Int
+  outlier_value     Float
+  detected_date     DateTime
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@map("kpi_calc_outliers")
+}
