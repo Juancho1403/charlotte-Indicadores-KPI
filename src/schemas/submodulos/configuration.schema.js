@@ -19,3 +19,13 @@ export const updateThresholdSchema = z.object({
         value_critical: z.number().optional(),
     }),
 });
+
+export const currentRules = z.object({
+    params: z.object({
+        metrick_type: z.string(),
+    }),
+    body: z.object({
+        value_warning: z.number().optional(),
+        value_critical: z.number().optional(),
+    })
+})

@@ -9,3 +9,8 @@ export const updateThreshold = async (metricKey, data) => {
     // TODO: Actualizar umbral (Prisma o JSON Config)
     return { success: true };
 };
+
+export const currentRules = async (metricKey, data) => {
+    // TODO: Actualizar umbral (Prisma o JSON Config)
+    return { success: true };
+};

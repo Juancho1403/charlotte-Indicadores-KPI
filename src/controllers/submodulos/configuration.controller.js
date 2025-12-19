@@ -1,5 +1,5 @@
 import * as configurationService from '../../services/submodulos/configuration.service.js';
-import { updateGoalSchema, updateThresholdSchema } from '../../schemas/submodulos/configuration.schema.js';
+import { updateGoalSchema, updateThresholdSchema, currentRules } from '../../schemas/submodulos/configuration.schema.js';
 
 export const updateGoal = async (req, res) => {
     try {
@@ -19,6 +19,32 @@ export const updateThreshold = async (req, res) => {
         if (!validation.success) return res.status(400).json({ errors: validation.error.format() });
 
         const result = await configurationService.updateThreshold(validation.data.params.metric_key, validation.data.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+export const getCurrentRules = async (req, res) => {
+    try {
+        const validation = currentRules.safeParse(req);
+        if (!validation.success) return res.status(400).json({ errors: validation.error.format() });
+
+        const result = await configurationService.currentRules(validation.data.params.metric_key, validation.data.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+export const updateCurrentRules = async (req, res) => {
+    try {
+        const validation = currentRules.safeParse(req);
+        if (!validation.success) return res.status(400).json({ errors: validation.error.format() });
+        
+        //Falta actualizar los datos en la base de datos
+
+        const result = await configurationService.currentRules(validation.data.params.metric_key, validation.data.body);
         res.json(result);
     } catch (error) {
         res.status(500).json({ error: error.message });
