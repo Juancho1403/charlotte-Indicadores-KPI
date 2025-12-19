@@ -1,0 +1,114 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+  
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// --------------------------------------------------------
+// ENUMS
+// --------------------------------------------------------
+
+enum KpiMetricType {
+  TIEMPO
+  ROTACION
+  STOCK
+  VENTAS
+}
+
+enum KpiSeverity {
+  CRITICAL // Rojo (#dc3545)
+  WARNING // Ambar (#ffc107)
+  INFO // Verde/Azul (#28a745)
+}
+
+// --------------------------------------------------------
+// MODELOS / TABLAS
+// --------------------------------------------------------
+
+// 2.1 Metas Financieras
+model kpi_metas {
+  id            Int      @id @default(autoincrement())
+  nombre        String
+  descripcion   String?
+  objetivo      Float
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+  kpi_report_jobs kpi_report_jobs[]
+}
+
+model kpi_report_jobs {
+  id            Int      @id @default(autoincrement())
+  kpiMetaId     Int
+  fecha         DateTime
+  valor         Float
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  // Relación con kpi_metas
+  kpi_metas     kpi_metas @relation(fields: [kpiMetaId], references: [id])
+}
+
+// 2.2 Reglas de Semáforo
+model KpiReglaSemaforo {
+  idRegla       Int           @id @default(autoincrement()) @map("id_regla")
+  tipoMetrica   KpiMetricType @map("tipo_metrica")
+  umbralAmbar   Decimal       @map("umbral_ambar") @db.Decimal(10, 2)
+  umbralRojo    Decimal       @map("umbral_rojo") @db.Decimal(10, 2)
+  mensajeAlerta String?       @map("mensaje_alerta") @db.VarChar(255)
+  notificarPush Boolean?      @default(false) @map("notificar_push")
+  colorHex      String?       @map("color_hex") @db.VarChar(7)
+
+  @@map("kpi_reglas_semaforo")
+}
+
+// 2.3 Snapshot Diario (Core BI)
+model KpiSnapshotDiario {
+  idLog               BigInt    @id @default(autoincrement()) @map("id_log")
+  fechaCorte          DateTime  @unique @map("fecha_corte") @db.Date
+  totalVentas         Decimal?  @default(0.00) @map("total_ventas") @db.Decimal(12, 2)
+  totalPedidos        Int?      @default(0) @map("total_pedidos")
+  tiempoPromedioMin   Decimal?  @map("tiempo_promedio_min") @db.Decimal(5, 2)
+  rotacionMesasIndice Decimal?  @map("rotacion_mesas_indice") @db.Decimal(4, 2)
+  ticketPromedio      Decimal?  @map("ticket_promedio") @db.Decimal(10, 2)
+  alertasGeneradas    Int?      @default(0) @map("alertas_generadas")
+  metadataJson        Json?     @map("metadata_json")
+  createdAt           DateTime? @default(now()) @map("created_at")
+
+  // Relaciones
+  alertas KpiAlertaHistorial[]
+
+  @@map("kpi_snapshot_diario")
+}
+
+// 2.4 Historial de Alertas
+model KpiAlertaHistorial {
+  idAlerta          BigInt             @id @default(autoincrement()) @map("id_alerta")
+  idSnapshot        BigInt?            @map("id_snapshot")
+  snapshot          KpiSnapshotDiario? @relation(fields: [idSnapshot], references: [idLog])
+  timestampCreacion DateTime?          @default(now()) @map("timestamp_creacion")
+  tipoIncidencia    KpiMetricType      @map("tipo_incidencia")
+  itemAfectado      String?            @map("item_afectado") @db.VarChar(150)
+  valorRegistrado   String?            @map("valor_registrado") @db.VarChar(50)
+  severidad         KpiSeverity
+  estadoGestion     String?            @default("PENDIENTE") @map("estado_gestion") @db.VarChar(20)
+
+  @@map("kpi_alerta_historial")
+}
+
+// 2.5 Auditoría de Exportaciones
+model KpiAuditoriaExport {
+  idExport         Int       @id @default(autoincrement()) @map("id_export")
+  usuarioId        Int       @map("usuario_id")
+  // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
+  fechaHora        DateTime? @default(now()) @map("fecha_hora")
+  filtrosAplicados String?   @map("filtros_aplicados") // Texto plano o JSON string
+  formato          String    @db.VarChar(10)
+
+  @@map("kpi_auditoria_export")
+}
