@@ -1,16 +1,28 @@
-import { prisma } from '../../db/client.js';
+import { reportQueue } from '../../config/queue.js'; // Importamos tu cola
+import { PrismaClient } from '@prisma/client';
 
-export const generateExport = async (data) => {
-    // TODO: Encolar job de exportación
-    return {
-        success: true,
-        message: "Reporte en cola.",
-        job_id: "job-" + Date.now(),
-        expires_in: 3600
-    };
-};
+const prisma = new PrismaClient();
 
-export const getJobStatus = async (jobId) => {
-    // TODO: Consultar estado de job
-    return { job_id: jobId, status: "PENDING", progress: 0 };
+export const createAsyncReport = async (data) => {
+  // 1. Enviar el trabajo a Redis
+  const job = await reportQueue.add('generate-csv', {
+      reportType: data.report_type,
+      start_date: data.start_date,
+      end_date: data.end_date,
+      format: data.format
+  });
+
+  // 2. Guardar auditoría en Base de Datos (Estado PENDING)
+  await prisma.kpiAuditoriaExport.create({
+      data: {
+          reportType: data.report_type,
+          status: 'PENDING',
+          jobId: job.id,
+          usuarioId: 1, // En el futuro usarás req.user.id
+          filtrosAplicados: JSON.stringify({ start: data.start_date, end: data.end_date }),
+          formato: data.format || 'CSV'
+      }
+  });
+
+  return job.id;
 };
