@@ -2,7 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import { envs } from './config/envs.js';
 import exampleRoutes from './routes/example/example.routes.js';
-import kpiRoutes from './routes/kpi/index.js';
+// He borrado la linea de (import kpiRoutes)'kpi/index.js' aquí porque chocaba con la de abajo
 import morgan from 'morgan';
 
 const app = express();
