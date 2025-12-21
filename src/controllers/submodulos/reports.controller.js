@@ -2,7 +2,7 @@
 import * as reportsService from '../../services/submodulos/reports.service.js';
 import { generateExportSchema, getJobStatusSchema } from '../../schemas/submodulos/reports.schema.js';
 
-export const generateExport = async (req, res) => {
+export const exportReport = async (req, res) => {
     try {
         //  Validamos que los datos que envía el usuario sean correctos (Zod)
         const validation = generateExportSchema.safeParse(req);
