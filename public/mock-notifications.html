@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Mock Notificaciones KPI</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f4f4f9; }
+        #log { border: 1px solid #ccc; padding: 10px; background: white; height: 300px; overflow-y: scroll; }
+        .alert { padding: 10px; margin-bottom: 5px; border-radius: 4px; border-left: 5px solid; }
+        .CRITICAL { background: #ffebee; border-color: #ef5350; }
+        .WARNING { background: #fff3e0; border-color: #ff9800; }
+        .INFO { background: #e3f2fd; border-color: #2196f3; }
+    </style>
+</head>
+<body>
+    <h1>📡 Monitor de Notificaciones (Tarea 3.6)</h1>
+    <div id="log">Esperando conexión...</div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io(); 
+        const log = document.getElementById('log');
+
+        function addEntry(html, type) {
+            const div = document.createElement('div');
+            div.className = `alert ${type}`;
+            div.innerHTML = `<span>${new Date().toLocaleTimeString()}</span> - ${html}`;
+            log.prepend(div);
+        }
+
+        socket.on('connect', () => {
+            addEntry('✅ Conectado al Servidor WS', 'INFO');
+        });
+
+        socket.on('notification', (data) => {
+            if (data.type === 'NEW_ALERT') {
+                const severity = data.payload.severidad || 'INFO';
+                const msg = `<strong>${data.message}</strong><br>Item: ${data.payload.itemAfectado}`;
+                addEntry(msg, severity);
+            }
+        });
+    </script>
+</body>
+</html>
