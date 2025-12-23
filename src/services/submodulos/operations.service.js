@@ -1,5 +1,10 @@
-import { prisma } from '../../db/client.js';
+import fetch from 'node-fetch';
+import { PrismaClient } from '@prisma/client';
 import { minutesBetween, isSameUtcDate } from "../../utils/timeHelpers.js"
+import { buildDateBuckets, dateKey, computeSlaComplianceForDurations, durationSecondsForOrder } from "../../utils/staffMetricsHelpers.js"
+import { parseISO, startOfDay, endOfDay, addDays, formatISO } from 'date-fns';
+
+const prisma = new PrismaClient();
 
 const COMANDAS_API_URL = process.env.COMANDAS_API_URL || 'http://localhost:3000/comandas';
 
@@ -131,7 +136,144 @@ export async function getSlaBreakdown(query = {}) {
   }
 }
 
-export const getStaffMetrics = async (waiterId, filters) => {
-    // TODO: Implementar métricas individuales
-    return { success: true, data: [] };
-};
+/**
+ * getStaffMetrics(waiter_id, query)
+ *
+ * Returns paginated time-series points for the requested waiter and date range.
+ */
+export async function getStaffMetrics(waiter_id, query = {}) {
+  const {
+    date_from: dateFromRaw,
+    date_to: dateToRaw,
+    granularity = 'daily',
+    page = 1,
+    page_size = 30,
+  } = query || {};
+
+  const now = new Date();
+  let dateFrom = dateFromRaw ? parseISO(String(dateFromRaw)) : addDays(startOfDay(now), -6);
+  let dateTo = dateToRaw ? parseISO(String(dateToRaw)) : startOfDay(now);
+
+  if (Number.isNaN(dateFrom.getTime())) dateFrom = addDays(startOfDay(now), -6);
+  if (Number.isNaN(dateTo.getTime())) dateTo = startOfDay(now);
+
+  if (dateFrom > dateTo) {
+    const tmp = dateFrom;
+    dateFrom = dateTo;
+    dateTo = tmp;
+  }
+
+  // 1) Fetch staff list from kitchen API (best-effort)
+  // Todavía no se ha implementado por lo que no puede llamar el API
+  let staffList = [];
+  try {
+    const base = process.env.KITCHEN_API_BASE || '';
+    const url = `${base}/api/kitchen/staff`;
+    const resp = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+    if (resp.ok) {
+      staffList = await resp.json();
+    } else {
+      staffList = [];
+    }
+  } catch (err) {
+    staffList = [];
+  }
+
+  const waiterIdStr = String(waiter_id);
+  const staffMember = staffList.find((s) => String(s.id) === waiterIdStr || String(s.userId) === waiterIdStr || String(s.workerCode) === waiterIdStr) || null;
+
+  // 2) Query orders from Prisma (best-effort; adapt to your schema)
+  const start = startOfDay(dateFrom);
+  const end = endOfDay(dateTo);
+
+  let orders = [];
+  try {
+    orders = await prisma.order.findMany({
+      where: {
+        OR: [
+          { waiterId: String(waiter_id) },
+          { waiter_id: String(waiter_id) },
+          { waiterId: Number(waiter_id) || undefined },
+        ],
+        createdAt: { gte: start, lte: end },
+      },
+      select: {
+        id: true,
+        waiterId: true,
+        createdAt: true,
+        finishedAt: true,
+        completedAt: true,
+      },
+    });
+  } catch (err) {
+    orders = [];
+  }
+
+  // 3) Aggregate into buckets
+  const buckets = buildDateBuckets(start, end, granularity);
+  const map = new Map();
+
+  for (const b of buckets) {
+    map.set(dateKey(b), { count: 0, durationsSeconds: [] });
+  }
+
+  for (const o of orders) {
+    const created = o.createdAt ? startOfDay(new Date(o.createdAt)) : null;
+    if (!created) continue;
+
+    let keyDate = dateKey(created);
+    if (!map.has(keyDate)) continue;
+
+    const entry = map.get(keyDate);
+    entry.count += 1;
+    const dur = durationSecondsForOrder(o);
+    if (dur != null) entry.durationsSeconds.push(dur);
+    map.set(keyDate, entry);
+  }
+
+  // 4) Fetch SLA rules from DB
+  let slaRules = [];
+  try {
+    slaRules = await prisma.kpiReglaSemaforo.findMany();
+  } catch (err) {
+    slaRules = [];
+  }
+
+  // Build points array
+  const points = [];
+  for (const [key, val] of map.entries()) {
+    const avgTime = val.durationsSeconds.length
+      ? Math.round(val.durationsSeconds.reduce((a, b) => a + b, 0) / val.durationsSeconds.length)
+      : null;
+    const slaCompliance = computeSlaComplianceForDurations(val.durationsSeconds, slaRules);
+    points.push({
+      date: key,
+      daily_orders: val.count,
+      avg_time: avgTime,
+      sla_compliance: slaCompliance,
+    });
+  }
+
+  points.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // 5) Pagination
+  const total = points.length;
+  const p = Number(page) && Number(page) > 0 ? Number(page) : 1;
+  const ps = Number(page_size) && Number(page_size) > 0 ? Number(page_size) : 30;
+  const startIndex = (p - 1) * ps;
+  const endIndex = startIndex + ps;
+  const paged = points.slice(startIndex, endIndex);
+  
+  return {
+    meta: {
+      total,
+      page: p,
+      page_size: ps,
+      waiter: staffMember || { id: waiter_id },
+      date_from: formatISO(start),
+      date_to: formatISO(end),
+      granularity,
+    },
+    data: paged,
+  };
+}

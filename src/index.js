@@ -29,9 +29,15 @@ let server;
 (async function start() {
   try {
     // Programar el job repetido en BullMQ
+
+    /*
+    Comentado hasta que se tenga que desplegar
+
     await scheduleDailyKpiJob();
     console.log('[KPI] Job diario programado');
     await startKpiWorker();
+    */
+    
 
     // Iniciar servidor Express
     server = app.listen(PORT, () => {
@@ -49,7 +55,7 @@ import { prisma } from './db/client.js';
 const gracefulShutdown = async () => {
   console.log('\nCerrando servidor y desconectando base de datos...');
   await prisma.$disconnect();
-  await shutdownKpiWorker();
+  //await shutdownKpiWorker();
   server.close(() => {
     console.log('Servidor cerrado correctamente.');
     process.exit(0);
