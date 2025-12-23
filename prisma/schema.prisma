@@ -101,3 +101,12 @@ model KpiAuditoriaExport {
 
   @@map("kpi_auditoria_export")
 }
+
+model KpiThresholdsHistorial {
+  idThreshold   Int       @id @default(autoincrement()) @map("id_threshold")
+  tipoMetrica   String    @map("metric_key")
+  valorAlerta   Int       @default(0) @map("value_warning")
+  valorCritico  Int       @default(0) @map("value_critical")
+  fechaCambio   DateTime?          @default(now()) @map("timestamp_creacion")
+  // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
+}
