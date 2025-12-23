@@ -11,10 +11,10 @@ export const getStaffRankingSchema = z.object({
     }),
 });
 
-export const getSlaBreakdownSchema = z.object({
-    query: z.object({
-        date: z.string().date().optional(),
-    }),
+export const getSlaBreakdownSchema = z.object({ 
+    query: z.object({ 
+        date: z.string().optional(), 
+    }).optional(), 
 });
 
 export const getStaffMetricsSchema = z.object({
