@@ -155,7 +155,7 @@ const worker = new Worker(
       const startIso = targetDay.toISOString();
       const endIso = targetDay.endOf('day').toISOString();
 
-      // Obtener /clients y /comandas desde la API (sin axios)
+      // Obtener /clients y /comandas desde la API
       let clients = [];
       let comandas = [];
 
