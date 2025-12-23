@@ -5,7 +5,7 @@ import http from 'http'; // 1. Necesario para crear el servidor compatible con S
 import { envs } from './config/envs.js';
 import { prisma } from './db/client.js'; // Mejor importar esto arriba
 import { initSocket } from './utils/socket.util.js'; // 2. Importamos tu nueva utilidad (nombre correcto)
-
+import { initEventWorker } from './workers/event.worker.js';
 // Rutas
 import exampleRoutes from './routes/example/example.routes.js';
 import kpiRoutes from './routes/main.route.js';
@@ -17,6 +17,11 @@ const app = express();
 const server = http.createServer(app); 
 // Inicializamos el socket pasando este servidor
 initSocket(server); 
+// ----------------------------------------------
+
+// --- CONFIGURACIÓN WORKER REDIS (Tarea 4.5) ---
+// Inicializamos el consumidor de eventos (arranca a escuchar Redis)
+initEventWorker();
 // ----------------------------------------------
 
 // Middlewares globales
