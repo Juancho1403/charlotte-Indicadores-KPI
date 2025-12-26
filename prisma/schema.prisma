@@ -95,9 +95,11 @@ model KpiAuditoriaExport {
   idExport         Int       @id @default(autoincrement()) @map("id_export")
   usuarioId        Int       @map("usuario_id")
   // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
+  direccionIP      String?   @map("ip_address")
   fechaHora        DateTime? @default(now()) @map("fecha_hora")
   filtrosAplicados String?   @map("filtros_aplicados") // Texto plano o JSON string
   formato          String    @db.VarChar(10)
+  codigoEstado     Int       @map("status_code")
 
   @@map("kpi_auditoria_export")
 }

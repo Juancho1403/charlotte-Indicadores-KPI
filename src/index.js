@@ -1,7 +1,6 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import { envs } from './config/envs.js';
-import exampleRoutes from './routes/example/example.routes.js';
 import morgan from 'morgan';
 import scheduleDailyKpiJob from './workers/KpiDailyWorker.js';
 import { startKpiWorker, shutdownKpiWorker } from './workers/KpiAlertWorker.js';
