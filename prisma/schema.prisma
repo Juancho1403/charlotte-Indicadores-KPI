@@ -126,3 +126,16 @@ model kpi_calc_outliers {
 
   @@map("kpi_calc_outliers")
 }
+
+//2.8 Gestion de archivos (Tarea 5.5 y 5.6)
+model ReportLog {
+  id            String   @id @default(uuid())
+  status        String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  type          String   @db.VarChar(50)     // Ej: "REPORTE_KPI"
+  fileUrl       String?  @map("file_url")    // URL de S3
+  idempotencyKey String? @unique @map("idempotency_key") // Para validación 5.6
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("report_logs")
+}

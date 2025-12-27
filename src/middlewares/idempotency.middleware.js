@@ -1,10 +1,10 @@
-import { connection } from '../config/queue.js'; // Importamos la conexión a Redis
+import { connection } from '../config/queue.js'; // Importamos la conexión existente
 
 export const idempotencyMiddleware = async (req, res, next) => {
   //  Busca la clave en las cabeceras
   const key = req.headers['idempotency-key'];
 
-  //  Si no hay clave, dejamos pasar (llama next)
+  //  Si no hay clave, dejamos pasar (no es obligatorio para todos los endpoints)
   if (!key) {
     return next();
   }
@@ -13,25 +13,31 @@ export const idempotencyMiddleware = async (req, res, next) => {
 
   try {
     //  Pregunta a Redis si ya existe
-    const exists = await connection.get(redisKey);
+    const cachedJobId = await connection.get(redisKey);
 
-    if (exists) {
-      // Si existe, respondemos con error (evitamos duplicados)
-      return res.status(409).json({
-        success: false,
-        message: "Esta operación ya fue procesada (Idempotency Key duplicada)."
+    if (cachedJobId) {
+      // REQUISITO 5.6: No devolvemos error, sino el JobID original
+      console.log(`[Idempotencia] Devolviendo JobID existente: ${cachedJobId}`);
+      return res.status(200).json({
+        success: true,
+        message: "Esta operación ya está en proceso.",
+        jobId: cachedJobId, // <--- CUMPLO CON EL REQUISITO AQUÍ
+        status: 'DUPLICATE_IGNORED'
       });
     }
 
-    //  Si no existe, la guardamos por 60 segundos
-    await connection.set(redisKey, 'processing', 'EX', 60);
+    //  Inyectamos una función helper en el request.
+    // Esto permite que el Controller guarde el JobID *después* de crearlo exitosamente.
+    req.saveIdempotencyKey = async (jobId) => {
+      // Guardamos el JobID por 5 minutos (300s) para reportes pesados
+      await connection.set(redisKey, jobId, 'EX', 300);
+    };
 
-    // 6. Todo bien, continuamos (llamar a next)
     next();
 
   } catch (error) {
     console.error("Error en Idempotency Middleware:", error);
-    // En caso de error de conexión, dejamos pasar por seguridad
+    // En caso de error de Redis, dejamos pasar la petición para no bloquear al usuario (Fail-open)
     next();
   }
 };
