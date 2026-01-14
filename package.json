@@ -12,8 +12,10 @@
   "author": "@jess-render",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.958.0",
     "@prisma/adapter-pg": "^6.9.0",
     "@prisma/client": "6.9.0",
+<<<<<<< HEAD
     "body-parser": "^2.2.1",
     "bullmq": "^5.66.2",
     "date-fns": "^4.1.0",
@@ -25,6 +27,15 @@
     "morgan": "^1.10.1",
     "node-fetch": "^3.3.2",
     "vscode-languageserver": "^9.0.1",
+=======
+    "axios": "^1.13.2",
+    "body-parser": "2.2.0",
+    "bullmq": "^5.66.1",
+    "express": "5.1.0",
+    "ioredis": "^5.8.2",
+    "morgan": "^1.10.1",
+    "socket.io": "^4.8.2",
+>>>>>>> origin/Angel
     "zod": "^4.1.13"
   },
   "devDependencies": {

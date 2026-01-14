@@ -104,6 +104,7 @@ model KpiAuditoriaExport {
   @@map("kpi_auditoria_export")
 }
 
+<<<<<<< HEAD
 model KpiThresholdsHistorial {
   idThreshold   Int       @id @default(autoincrement()) @map("id_threshold")
   tipoMetrica   String    @map("metric_key")
@@ -111,4 +112,41 @@ model KpiThresholdsHistorial {
   valorCritico  Int       @default(0) @map("value_critical")
   fechaCambio   DateTime?          @default(now()) @map("timestamp_creacion")
   // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
+=======
+//2.6 Historial de Calculos(kpi_calc_history)
+model kpi_calc_history {
+  id                Int      @id @default(autoincrement())
+  kpi_id            Int
+  calculation_date  DateTime
+  result            Float
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@map("kpi_calc_history")
+}
+
+//2.7 Valores Atipicos Calculo (kpi_calc_outliers)
+model kpi_calc_outliers {
+  id                Int      @id @default(autoincrement())
+  kpi_id            Int
+  outlier_value     Float
+  detected_date     DateTime
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@map("kpi_calc_outliers")
+}
+
+//2.8 Gestion de archivos (Tarea 5.5 y 5.6)
+model ReportLog {
+  id            String   @id @default(uuid())
+  status        String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  type          String   @db.VarChar(50)     // Ej: "REPORTE_KPI"
+  fileUrl       String?  @map("file_url")    // URL de S3
+  idempotencyKey String? @unique @map("idempotency_key") // Para validación 5.6
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("report_logs")
+>>>>>>> origin/Angel
 }
