@@ -1,6 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient } from '@prisma/client';
+import pkg from '@prisma/client';
+const { PrismaClient } = pkg;
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -16,10 +17,12 @@ const redisOptions = {
 };
 
 const prisma = new PrismaClient();
-const connection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', redisOptions);
 
+// Lazy-initialized Redis/Queue/Worker to avoid connecting on module import
+let connection = null;
+let queue = null;
+let worker = null;
 const QUEUE_NAME = 'kpi-daily';
-const queue = new Queue(QUEUE_NAME, { connection });
 
 // Configuración por ENV
 const OUTLIER_K = Number(process.env.OUTLIER_K) || 2;
@@ -29,9 +32,33 @@ const CRON_TIMEZONE = process.env.KPI_CRON_TZ || 'America/Caracas';
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
 const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || null; // opcional
 
+// Inicializa conexión Redis y cola/worker si es necesario
+async function initQueueAndWorker() {
+  if (queue) return { connection, queue, worker };
+  try {
+    connection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', redisOptions);
+    queue = new Queue(QUEUE_NAME, { connection });
+
+    // Inicializar solo la conexión y la cola; el worker principal se crea más abajo
+    // (evita crear múltiples Workers sobre la misma cola)
+  } catch (err) {
+    console.warn('⚠️ Redis no disponible para KpiDailyWorker, funcionalidad deshabilitada:', err && err.message ? err.message : err);
+    connection = null;
+    queue = null;
+    worker = null;
+  }
+
+  return { connection, queue, worker };
+}
+
 // Programa job repetido 
 async function scheduleDailyKpiJob() {
-  await queue.add(
+  const ctx = await initQueueAndWorker();
+  if (!ctx.queue) {
+    console.warn('No se pudo programar job diario: cola Redis no inicializada.');
+    return null;
+  }
+  await ctx.queue.add(
     'calculate-daily-kpi',
     {},
     {
@@ -142,170 +169,196 @@ async function fetchJson(path, params = {}) {
   return res.json();
 }
 
-// Worker: lógica del job
-const worker = new Worker(
-  QUEUE_NAME,
-  async job => {
-    try {
-      const now = dayjs().tz(CRON_TIMEZONE);
-      const targetDay = now.subtract(1, 'day').startOf('day');
-      const start = targetDay.toDate();
-      const end = targetDay.endOf('day').toDate();
+// Worker creation moved to runtime to avoid import-time Redis connections
+export async function startKpiDailyWorker() {
+  if (String(process.env.DISABLE_REDIS || '').toLowerCase() === 'true') {
+    console.warn('⚠️ startKpiDailyWorker: DISABLE_REDIS=true -> not starting');
+    return null;
+  }
 
-      const startIso = targetDay.toISOString();
-      const endIso = targetDay.endOf('day').toISOString();
+  const ctx = await initQueueAndWorker();
+  if (!ctx.connection || !ctx.queue) {
+    console.warn('⚠️ KpiDailyWorker: Redis no disponible, worker no arrancado');
+    return null;
+  }
 
-      // Obtener /clients y /comandas desde la API
-      let clients = [];
-      let comandas = [];
+  if (worker) return worker;
 
+  worker = new Worker(
+    QUEUE_NAME,
+    async job => {
       try {
-        const clientsResp = await fetchJson('/clients', { query: { start: startIso, end: endIso } });
-        clients = Array.isArray(clientsResp?.data) ? clientsResp.data : [];
-      } catch (e) {
-        logger.logFetchWarning('/clients', e.status || 'network', e.message);
-        clients = [];
-      }
+        const now = dayjs().tz(CRON_TIMEZONE);
+        const targetDay = now.subtract(1, 'day').startOf('day');
+        const start = targetDay.toDate();
+        const end = targetDay.endOf('day').toDate();
 
-      try {
-        const comandasResp = await fetchJson('/comandas', { query: { start: startIso, end: endIso } });
-        comandas = Array.isArray(comandasResp?.data) ? comandasResp.data : [];
-      } catch (e) {
-        logger.logFetchWarning('/comandas', e.status || 'network', e.message);
-        comandas = [];
-      }
+        const startIso = targetDay.toISOString();
+        const endIso = targetDay.endOf('day').toISOString();
 
-      // Filtrar clientes cerrados en el rango
-      const closedClients = clients.filter(c => c.status === 'CLOSED' && c.closed_at);
+        // Obtener /clients y /comandas desde la API
+        let clients = [];
+        let comandas = [];
 
-      if (!closedClients.length && !comandas.length) {
-        logger.info('No data for target day', { start, end });
+        try {
+          const clientsResp = await fetchJson('/clients', { query: { start: startIso, end: endIso } });
+          clients = Array.isArray(clientsResp?.data) ? clientsResp.data : [];
+        } catch (e) {
+          logger.logFetchWarning('/clients', e.status || 'network', e.message);
+          clients = [];
+        }
+
+        try {
+          const comandasResp = await fetchJson('/comandas', { query: { start: startIso, end: endIso } });
+          comandas = Array.isArray(comandasResp?.data) ? comandasResp.data : [];
+        } catch (e) {
+          logger.logFetchWarning('/comandas', e.status || 'network', e.message);
+          comandas = [];
+        }
+
+        // Filtrar clientes cerrados en el rango
+        const closedClients = clients.filter(c => c.status === 'CLOSED' && c.closed_at);
+
+        if (!closedClients.length && !comandas.length) {
+          logger.info('No data for target day', { start, end });
+          await prisma.kpiSnapshotDiario.create({
+            data: {
+              fechaCorte: targetDay.toDate(),
+              totalVentas: '0.00',
+              totalPedidos: 0,
+              tiempoPromedioMin: '0.00',
+              rotacionMesasIndice: '0.00',
+              ticketPromedio: '0.00',
+              alertasGeneradas: 0,
+              metadataJson: {
+                note: 'no_data',
+                dateRange: { start, end },
+              },
+            },
+          });
+          return;
+        }
+
+        // --- Ingresos ---
+        const revenues = closedClients
+          .map(c => {
+            const v = Number(c.total_amount ?? 0);
+            return isNaN(v) ? 0 : v;
+          })
+          .filter(v => v >= 0);
+
+        // --- Service times (ms) ---
+        const serviceTimesMs = [];
+        comandas.forEach(cmd => {
+          const m = cmd.metrics || {};
+          if (typeof m.service_time_minutes === 'number') {
+            serviceTimesMs.push(m.service_time_minutes * 60000);
+          } else if (typeof m.elapsed_minutes === 'number') {
+            serviceTimesMs.push(m.elapsed_minutes * 60000);
+          } else if (cmd.sent_at && cmd.delivered_at) {
+            const sent = new Date(cmd.sent_at).getTime();
+            const delivered = new Date(cmd.delivered_at).getTime();
+            if (!isNaN(sent) && !isNaN(delivered) && delivered >= sent) {
+              serviceTimesMs.push(delivered - sent);
+            }
+          }
+        });
+
+        // --- Rotación de mesas ---
+        const tableIdsFromComandas = new Set(comandas.map(c => c.table_number).filter(Boolean));
+        const tableIdsFromClients = new Set(closedClients.map(c => c.tableId || c.table_number).filter(Boolean));
+        const distinctTables = new Set([...tableIdsFromComandas, ...tableIdsFromClients]);
+        const tableRotations = closedClients.length || comandas.length;
+        const distinctTablesCount = distinctTables.size || 1;
+        const rotacionMesasIndice = tableRotations / distinctTablesCount;
+
+        // --- Outliers ---
+        const revenueOut = handleOutliers(revenues, OUTLIER_K, OUTLIER_STRATEGY);
+        const serviceOut = handleOutliers(serviceTimesMs, OUTLIER_K, OUTLIER_STRATEGY);
+
+        // --- Cálculos finales ---
+        const totalRevenue = revenueOut.processed.reduce((a, b) => a + b, 0);
+        if (!isFinite(totalRevenue) || isNaN(totalRevenue)) {
+          logger.logUnexpectedValue('totalRevenue calculation', totalRevenue, 'finite number >= 0');
+        }
+        const totalPedidos = revenueOut.processed.length;
+        const avgServiceMs = serviceOut.processed.length ? median(serviceOut.processed) : 0;
+        const avgServiceMin = avgServiceMs / 60000;
+        const ticketPromedio = totalPedidos ? totalRevenue / totalPedidos : 0;
+        const outliersCount = revenueOut.outliersCount + serviceOut.outliersCount;
+        if (outliersCount > Math.max(5, Math.floor(revenues.length * 0.1))) {
+          logger.logOutlierSummary(targetDay.format('YYYY-MM-DD'), revenueOut, serviceOut, outliersCount);
+        }
+
+        const metadata = {
+          dateRange: { start, end },
+          outlierConfig: { k: OUTLIER_K, strategy: OUTLIER_STRATEGY },
+          revenueStats: {
+            rawCount: revenues.length,
+            processedCount: revenueOut.processed.length,
+            mu: revenueOut.mu,
+            sd: revenueOut.sd,
+            lower: revenueOut.lower,
+            upper: revenueOut.upper,
+          },
+          serviceStats: {
+            rawCount: serviceTimesMs.length,
+            processedCount: serviceOut.processed.length,
+            muMs: serviceOut.mu,
+            sdMs: serviceOut.sd,
+            lowerMs: serviceOut.lower,
+            upperMs: serviceOut.upper,
+          },
+          tables: {
+            distinctTables: Array.from(distinctTables).slice(0, 50),
+            distinctTablesCount,
+          },
+          sourceCounts: {
+            clients: closedClients.length,
+            comandas: comandas.length
+          }
+        };
+
+        // Guardar snapshot
         await prisma.kpiSnapshotDiario.create({
           data: {
             fechaCorte: targetDay.toDate(),
-            totalVentas: '0.00',
-            totalPedidos: 0,
-            tiempoPromedioMin: '0.00',
-            rotacionMesasIndice: '0.00',
-            ticketPromedio: '0.00',
-            alertasGeneradas: 0,
-            metadataJson: {
-              note: 'no_data',
-              dateRange: { start, end },
-            },
+            totalVentas: totalRevenue.toFixed(2),
+            totalPedidos: totalPedidos,
+            tiempoPromedioMin: avgServiceMin.toFixed(2),
+            rotacionMesasIndice: rotacionMesasIndice.toFixed(2),
+            ticketPromedio: ticketPromedio.toFixed(2),
+            alertasGeneradas: outliersCount,
+            metadataJson: metadata,
           },
         });
-        return;
+
+        console.log(`[KPI] Snapshot guardado para ${targetDay.format('YYYY-MM-DD')}: ventas=${totalRevenue.toFixed(2)}, pedidos=${totalPedidos}`);
+      } catch (err) {
+        console.error('[KPI] Error en job:', err);
+        throw err;
       }
-
-      // --- Ingresos ---
-      const revenues = closedClients
-        .map(c => {
-          const v = Number(c.total_amount ?? 0);
-          return isNaN(v) ? 0 : v;
-        })
-        .filter(v => v >= 0);
-
-      // --- Service times (ms) ---
-      const serviceTimesMs = [];
-      comandas.forEach(cmd => {
-        const m = cmd.metrics || {};
-        if (typeof m.service_time_minutes === 'number') {
-          serviceTimesMs.push(m.service_time_minutes * 60000);
-        } else if (typeof m.elapsed_minutes === 'number') {
-          serviceTimesMs.push(m.elapsed_minutes * 60000);
-        } else if (cmd.sent_at && cmd.delivered_at) {
-          const sent = new Date(cmd.sent_at).getTime();
-          const delivered = new Date(cmd.delivered_at).getTime();
-          if (!isNaN(sent) && !isNaN(delivered) && delivered >= sent) {
-            serviceTimesMs.push(delivered - sent);
-          }
-        }
-      });
-
-      // --- Rotación de mesas ---
-      const tableIdsFromComandas = new Set(comandas.map(c => c.table_number).filter(Boolean));
-      const tableIdsFromClients = new Set(closedClients.map(c => c.tableId || c.table_number).filter(Boolean));
-      const distinctTables = new Set([...tableIdsFromComandas, ...tableIdsFromClients]);
-      const tableRotations = closedClients.length || comandas.length;
-      const distinctTablesCount = distinctTables.size || 1;
-      const rotacionMesasIndice = tableRotations / distinctTablesCount;
-
-      // --- Outliers ---
-      const revenueOut = handleOutliers(revenues, OUTLIER_K, OUTLIER_STRATEGY);
-      const serviceOut = handleOutliers(serviceTimesMs, OUTLIER_K, OUTLIER_STRATEGY);
-
-      // --- Cálculos finales ---
-      const totalRevenue = revenueOut.processed.reduce((a, b) => a + b, 0);
-      if (!isFinite(totalRevenue) || isNaN(totalRevenue)) {
-        logger.logUnexpectedValue('totalRevenue calculation', totalRevenue, 'finite number >= 0');
-      }
-      const totalPedidos = revenueOut.processed.length;
-      const avgServiceMs = serviceOut.processed.length ? median(serviceOut.processed) : 0;
-      const avgServiceMin = avgServiceMs / 60000;
-      const ticketPromedio = totalPedidos ? totalRevenue / totalPedidos : 0;
-      const outliersCount = revenueOut.outliersCount + serviceOut.outliersCount;
-      if (outliersCount > Math.max(5, Math.floor(revenues.length * 0.1))) {
-        logger.logOutlierSummary(targetDay.format('YYYY-MM-DD'), revenueOut, serviceOut, outliersCount);
-      }
-
-      const metadata = {
-        dateRange: { start, end },
-        outlierConfig: { k: OUTLIER_K, strategy: OUTLIER_STRATEGY },
-        revenueStats: {
-          rawCount: revenues.length,
-          processedCount: revenueOut.processed.length,
-          mu: revenueOut.mu,
-          sd: revenueOut.sd,
-          lower: revenueOut.lower,
-          upper: revenueOut.upper,
-        },
-        serviceStats: {
-          rawCount: serviceTimesMs.length,
-          processedCount: serviceOut.processed.length,
-          muMs: serviceOut.mu,
-          sdMs: serviceOut.sd,
-          lowerMs: serviceOut.lower,
-          upperMs: serviceOut.upper,
-        },
-        tables: {
-          distinctTables: Array.from(distinctTables).slice(0, 50),
-          distinctTablesCount,
-        },
-        sourceCounts: {
-          clients: closedClients.length,
-          comandas: comandas.length
-        }
-      };
-
-      // Guardar snapshot
-      await prisma.kpiSnapshotDiario.create({
-        data: {
-          fechaCorte: targetDay.toDate(),
-          totalVentas: totalRevenue.toFixed(2),
-          totalPedidos: totalPedidos,
-          tiempoPromedioMin: avgServiceMin.toFixed(2),
-          rotacionMesasIndice: rotacionMesasIndice.toFixed(2),
-          ticketPromedio: ticketPromedio.toFixed(2),
-          alertasGeneradas: outliersCount,
-          metadataJson: metadata,
-        },
-      });
-
-      console.log(`[KPI] Snapshot guardado para ${targetDay.format('YYYY-MM-DD')}: ventas=${totalRevenue.toFixed(2)}, pedidos=${totalPedidos}`);
-    } catch (err) {
-      console.error('[KPI] Error en job:', err);
-      throw err;
+    },
+    {
+      connection: ctx.connection,
+      concurrency: 1,
+      autorun: true,
     }
-  },
-  {
-    connection,
-    concurrency: 1,
-    autorun: true,
-  }
-);
+  );
 
-worker.on('completed', job => console.log(`Job ${job.id} completado`));
-worker.on('failed', (job, err) => console.error(`Job ${job?.id} falló:`, err));
+  worker.on('completed', job => console.log(`Job ${job.id} completado`));
+  worker.on('failed', (job, err) => console.error(`Job ${job?.id} falló:`, err));
+
+  return worker;
+}
+
+export async function shutdownKpiDailyWorker() {
+  try { if (intervalHandle) clearInterval(intervalHandle); } catch (e) {}
+  try { if (worker) await worker.close(); } catch (e) { console.error('Error cerrando worker:', e); }
+  try { if (queue) await queue.close(); } catch (e) {}
+  try { if (connection) await connection.quit(); } catch (e) {}
+  try { await prisma.$disconnect(); } catch (e) {}
+  worker = null; queue = null; connection = null;
+}
 
 export default scheduleDailyKpiJob;

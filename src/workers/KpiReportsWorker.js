@@ -1,15 +1,24 @@
 // worker.mjs
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
+import { connectRedisIfAvailable } from '../utils/redis.util.js';
 import ExcelJS from 'exceljs';
 import { PassThrough } from 'stream';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { PrismaClient } from '@prisma/client';
+import pkg from '@prisma/client';
+const { PrismaClient } = pkg;
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const redisConnection = new IORedis(REDIS_URL);
+const redisOptions = {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: true,
+  retryStrategy: times => Math.min(times * 50, 2000),
+};
+let redisConnection = null;
+let worker = null;
+let disabledBecause = null;
 
 const prisma = new PrismaClient();
 
@@ -23,8 +32,8 @@ const s3Client = new S3Client({
 
 const BUCKET = process.env.S3_BUCKET;
 if (!BUCKET) {
-  console.error('S3_BUCKET no definido');
-  process.exit(1);
+  disabledBecause = 'S3_BUCKET no definido';
+  console.error('⚠️ KpiReportsWorker deshabilitado: S3_BUCKET no definido');
 }
 
 const PRESIGNED_EXPIRES = Number(process.env.PRESIGNED_EXPIRES || 3600); // segundos
@@ -193,28 +202,55 @@ async function processor(job) {
   }
 }
 
-// Crear worker
-const worker = new Worker(
-  'reports-queue',
-  processor,
-  {
-    connection: redisConnection,
-    concurrency: WORKER_CONCURRENCY,
+// Crear worker solo si Redis está disponible
+async function startKpiReportsWorker() {
+  if (disabledBecause) {
+    console.warn('KpiReportsWorker no arrancado:', disabledBecause);
+    return;
   }
-);
 
-worker.on('completed', (job) => {
-  console.log(`Job ${job.id} completado`);
-});
+  if (process.env.DISABLE_REDIS === 'true' || process.env.DISABLE_REDIS === '1') {
+    console.warn('KpiReportsWorker no arrancado: DISABLE_REDIS activo');
+    return;
+  }
 
-worker.on('failed', (job, err) => {
-  console.error(`Job ${job?.id} falló:`, err?.message ?? err);
-});
+  if (worker) return; // already started
+
+  try {
+    redisConnection = await connectRedisIfAvailable(REDIS_URL, redisOptions, 800);
+    if (!redisConnection) {
+      console.warn('⚠️ KpiReportsWorker: Redis no disponible (timeout), worker no arrancado');
+      return;
+    }
+  } catch (err) {
+    console.warn('⚠️ No se pudo crear conexión a Redis en KpiReportsWorker:', err && err.message ? err.message : err);
+    redisConnection = null;
+    return;
+  }
+
+  try {
+    worker = new Worker('reports-queue', processor, { connection: redisConnection, concurrency: WORKER_CONCURRENCY });
+
+    worker.on('completed', (job) => console.log(`Job ${job.id} completado`));
+    worker.on('failed', (job, err) => console.error(`Job ${job?.id} falló:`, err?.message ?? err));
+  } catch (err) {
+    console.warn('⚠️ No se pudo inicializar Worker reports-queue:', err && err.message ? err.message : err);
+    worker = null;
+  }
+}
+
+async function shutdownKpiReportsWorker() {
+  try {
+    if (worker) {
+      await worker.close();
+      worker = null;
+    }
+  } catch (e) { /* ignore */ }
+
+  try { if (redisConnection) await redisConnection.quit(); } catch (e) { /* ignore */ }
+  redisConnection = null;
+  try { await prisma.$disconnect(); } catch (e) { /* ignore */ }
+}
 
 // Cierre limpio
-process.on('SIGINT', async () => {
-  console.log('Cerrando worker...');
-  await worker.close();
-  await prisma.$disconnect();
-  process.exit(0);
-});
+export { startKpiReportsWorker, shutdownKpiReportsWorker };

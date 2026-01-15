@@ -1,10 +1,14 @@
-import { PrismaClient } from '@prisma/client'; 
-
-const prisma = new PrismaClient();
+import { prisma } from '../../db/client.js';
 
 export const updateGoal = async (id, data) => {
-    // TODO: Actualizar meta en DB
-    return { success: true };
+    const updated = await prisma.kpiMeta.update({
+        where: { idMeta: Number(id) },
+        data: {
+            montoObjetivo: data.target_amount,
+            fechaFin: data.end_date ? new Date(data.end_date) : undefined
+        }
+    });
+    return { success: true, data: updated };
 };
 
 /**

@@ -1,22 +1,22 @@
 // kpiWorker.mjs
 import { Worker, Queue } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient, KpiMetricType, KpiSeverity } from '@prisma/client';
+import pkg from '@prisma/client';
+const { PrismaClient, KpiMetricType, KpiSeverity } = pkg;
 
 const prisma = new PrismaClient();
 
 const redisOptions = {
   maxRetriesPerRequest: null,            // obligatorio para BullMQ
-  enableReadyCheck: true,                
+  enableReadyCheck: true,
   retryStrategy: times => Math.min(times * 50, 2000),
 };
 
-// Redis connection (lee desde env)
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const connection = new IORedis(REDIS_URL, redisOptions);
-
+// Lazy resources (no connect on import)
+let connection = null;
+let queue = null;
+let worker = null;
 const queueName = process.env.KPI_QUEUE_NAME || 'kpi-check-queue';
-const queue = new Queue(queueName, { connection });
 
 // Endpoints (leer desde env)
 const CLIENTS_URL = process.env.CLIENTS_URL || 'http://localhost:3000/clients';
@@ -194,19 +194,7 @@ async function runKpiCheck() {
   }
 }
 
-// Worker: procesa jobs que ejecutan runKpiCheck
-const worker = new Worker(queueName, async job => {
-  console.log('Procesando job', job.id, 'data:', job.data);
-  await runKpiCheck();
-}, { connection });
-
-// Eventos
-worker.on('completed', job => {
-  console.log(`Job ${job.id} completado`);
-});
-worker.on('failed', (job, err) => {
-  console.error(`Job ${job.id} falló:`, err);
-});
+// Worker will be created when startKpiWorker is called. This avoids connecting on import.
 
 // Scheduler interno basado en KPI_CRON (soporta expresiones del tipo "*/N * * * *")
 function cronToIntervalMs(cronExpr) {
@@ -245,21 +233,46 @@ async function startInternalScheduler() {
 
 // exportar funciones para controlar el worker desde index.js
 export async function startKpiWorker() {
-  // inicializa lo que ya tienes: conexión, worker y startInternalScheduler()
+  // inicializa conexión Redis, cola y worker de forma perezosa
+  const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
   console.log('Iniciando KPI worker');
   console.log('REDIS_URL:', REDIS_URL);
   console.log('CLIENTS_URL:', CLIENTS_URL);
   console.log('SERVICE_REQUESTS_URL:', SERVICE_REQUESTS_URL);
   console.log('KPI_CRON:', KPI_CRON, '=> intervalMs:', intervalMs);
-  await startInternalScheduler(); // usa la función existente en el archivo
-  return { worker, queue }; // opcional: devolver referencias
+
+  try {
+    connection = new IORedis(REDIS_URL, redisOptions);
+    queue = new Queue(queueName, { connection });
+
+    worker = new Worker(queueName, async job => {
+      console.log('Procesando job', job.id, 'data:', job.data);
+      await runKpiCheck();
+    }, { connection });
+
+    worker.on('completed', job => {
+      console.log(`Job ${job.id} completado`);
+    });
+    worker.on('failed', (job, err) => {
+      console.error(`Job ${job.id} falló:`, err);
+    });
+
+    await startInternalScheduler();
+    return { worker, queue, connection };
+  } catch (err) {
+    console.warn('⚠️ Redis no disponible para KpiAlertWorker, desactivando worker:', err && err.message ? err.message : err);
+    connection = null;
+    queue = null;
+    worker = null;
+    return null;
+  }
 }
 
 export async function shutdownKpiWorker() {
   console.log('Apagando KPI worker');
   if (intervalHandle) clearInterval(intervalHandle);
-  try { await worker.close(); } catch (e) { /* ignore */ }
-  try { await queue.close(); } catch (e) { /* ignore */ }
+  try { if (worker) await worker.close(); } catch (e) { /* ignore */ }
+  try { if (queue) await queue.close(); } catch (e) { /* ignore */ }
   try { await prisma.$disconnect(); } catch (e) { /* ignore */ }
-  try { await connection.quit(); } catch (e) { /* ignore */ }
+  try { if (connection) await connection.quit(); } catch (e) { /* ignore */ }
 }

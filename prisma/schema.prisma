@@ -1,7 +1,5 @@
-<<<<<<< HEAD
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -28,7 +26,7 @@ enum KpiSeverity {
 }
 
 // --------------------------------------------------------
-// MODELOS / TABLAS
+// KPI MODULE TABLES (From SQL Script)
 // --------------------------------------------------------
 
 // 2.1 Metas Financieras
@@ -95,175 +93,63 @@ model KpiAlertaHistorial {
 model KpiAuditoriaExport {
   idExport         Int       @id @default(autoincrement()) @map("id_export")
   usuarioId        Int       @map("usuario_id")
-  // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
-  direccionIP      String?   @map("ip_address")
+  // Relation to external User model
+  usuario          User      @relation(fields: [usuarioId], references: [id])
   fechaHora        DateTime? @default(now()) @map("fecha_hora")
-  filtrosAplicados String?   @map("filtros_aplicados") // Texto plano o JSON string
+  filtrosAplicados String?   @map("filtros_aplicados")
   formato          String    @db.VarChar(10)
-  codigoEstado     Int       @map("status_code")
 
   @@map("kpi_auditoria_export")
 }
 
-<<<<<<< HEAD
-model KpiThresholdsHistorial {
-  idThreshold   Int       @id @default(autoincrement()) @map("id_threshold")
-  tipoMetrica   String    @map("metric_key")
-  valorAlerta   Int       @default(0) @map("value_warning")
-  valorCritico  Int       @default(0) @map("value_critical")
-  fechaCambio   DateTime?          @default(now()) @map("timestamp_creacion")
-  // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
-=======
-//2.6 Historial de Calculos(kpi_calc_history)
-model kpi_calc_history {
-  id                Int      @id @default(autoincrement())
-  kpi_id            Int
-  calculation_date  DateTime
-  result            Float
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+// --------------------------------------------------------
+// EXTERNAL MODELS (STUBS FOR COMPILATION)
+// These models are assumed to exist in the database or are needed
+// for strict typing in the application logic.
+// --------------------------------------------------------
 
-  @@map("kpi_calc_history")
+model User {
+  id    Int     @id @default(autoincrement())
+  email String  @unique
+  name  String?
+  role  String  @default("USER")
+
+  // Relations
+  exports KpiAuditoriaExport[]
+
+  @@map("usuario") // Mapping to existing table if present
 }
 
-//2.7 Valores Atipicos Calculo (kpi_calc_outliers)
-model kpi_calc_outliers {
-  id                Int      @id @default(autoincrement())
-  kpi_id            Int
-  outlier_value     Float
-  detected_date     DateTime
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+model Order {
+  id          Int       @id @default(autoincrement())
+  waiterId    Int?      @map("waiter_id")
+  total       Decimal?  @db.Decimal(10, 2)
+  status      String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  finishedAt  DateTime? @map("finished_at")
+  completedAt DateTime? @map("completed_at")
 
-  @@map("kpi_calc_outliers")
+  @@map("orders") // Assumed table name
 }
 
-//2.8 Gestion de archivos (Tarea 5.5 y 5.6)
+model DpNote {
+  id          Int      @id @default(autoincrement())
+  totalAmount Decimal  @map("total_amount")
+  status      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("dp_notes") // Assumed table name
+}
+
+// 2.8 Gestion de archivos (Required for Reports Worker)
 model ReportLog {
-  id            String   @id @default(uuid())
-  status        String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
-  type          String   @db.VarChar(50)     // Ej: "REPORTE_KPI"
-  fileUrl       String?  @map("file_url")    // URL de S3
-  idempotencyKey String? @unique @map("idempotency_key") // Para validación 5.6
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  status         String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  type           String   @db.VarChar(50) // Ej: "REPORTE_KPI"
+  fileUrl        String?  @map("file_url") // URL de S3
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@map("report_logs")
->>>>>>> origin/Angel
 }
-=======
-generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-  
-}
-
-datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
-}
-
-// --------------------------------------------------------
-// ENUMS
-// --------------------------------------------------------
-
-enum KpiMetricType {
-  TIEMPO
-  ROTACION
-  STOCK
-  VENTAS
-}
-
-enum KpiSeverity {
-  CRITICAL // Rojo (#dc3545)
-  WARNING // Ambar (#ffc107)
-  INFO // Verde/Azul (#28a745)
-}
-
-// --------------------------------------------------------
-// MODELOS / TABLAS
-// --------------------------------------------------------
-
-// 2.1 Metas Financieras
-model kpi_metas {
-  id            Int      @id @default(autoincrement())
-  nombre        String
-  descripcion   String?
-  objetivo      Float
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-  kpi_report_jobs kpi_report_jobs[]
-}
-
-model kpi_report_jobs {
-  id            Int      @id @default(autoincrement())
-  kpiMetaId     Int
-  fecha         DateTime
-  valor         Float
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  // Relación con kpi_metas
-  kpi_metas     kpi_metas @relation(fields: [kpiMetaId], references: [id])
-}
-
-// 2.2 Reglas de Semáforo
-model KpiReglaSemaforo {
-  idRegla       Int           @id @default(autoincrement()) @map("id_regla")
-  tipoMetrica   KpiMetricType @map("tipo_metrica")
-  umbralAmbar   Decimal       @map("umbral_ambar") @db.Decimal(10, 2)
-  umbralRojo    Decimal       @map("umbral_rojo") @db.Decimal(10, 2)
-  mensajeAlerta String?       @map("mensaje_alerta") @db.VarChar(255)
-  notificarPush Boolean?      @default(false) @map("notificar_push")
-  colorHex      String?       @map("color_hex") @db.VarChar(7)
-
-  @@map("kpi_reglas_semaforo")
-}
-
-// 2.3 Snapshot Diario (Core BI)
-model KpiSnapshotDiario {
-  idLog               BigInt    @id @default(autoincrement()) @map("id_log")
-  fechaCorte          DateTime  @unique @map("fecha_corte") @db.Date
-  totalVentas         Decimal?  @default(0.00) @map("total_ventas") @db.Decimal(12, 2)
-  totalPedidos        Int?      @default(0) @map("total_pedidos")
-  tiempoPromedioMin   Decimal?  @map("tiempo_promedio_min") @db.Decimal(5, 2)
-  rotacionMesasIndice Decimal?  @map("rotacion_mesas_indice") @db.Decimal(4, 2)
-  ticketPromedio      Decimal?  @map("ticket_promedio") @db.Decimal(10, 2)
-  alertasGeneradas    Int?      @default(0) @map("alertas_generadas")
-  metadataJson        Json?     @map("metadata_json")
-  createdAt           DateTime? @default(now()) @map("created_at")
-
-  // Relaciones
-  alertas KpiAlertaHistorial[]
-
-  @@map("kpi_snapshot_diario")
-}
-
-// 2.4 Historial de Alertas
-model KpiAlertaHistorial {
-  idAlerta          BigInt             @id @default(autoincrement()) @map("id_alerta")
-  idSnapshot        BigInt?            @map("id_snapshot")
-  snapshot          KpiSnapshotDiario? @relation(fields: [idSnapshot], references: [idLog])
-  timestampCreacion DateTime?          @default(now()) @map("timestamp_creacion")
-  tipoIncidencia    KpiMetricType      @map("tipo_incidencia")
-  itemAfectado      String?            @map("item_afectado") @db.VarChar(150)
-  valorRegistrado   String?            @map("valor_registrado") @db.VarChar(50)
-  severidad         KpiSeverity
-  estadoGestion     String?            @default("PENDIENTE") @map("estado_gestion") @db.VarChar(20)
-
-  @@map("kpi_alerta_historial")
-}
-
-// 2.5 Auditoría de Exportaciones
-model KpiAuditoriaExport {
-  idExport         Int       @id @default(autoincrement()) @map("id_export")
-  usuarioId        Int       @map("usuario_id")
-  // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
-  fechaHora        DateTime? @default(now()) @map("fecha_hora")
-  filtrosAplicados String?   @map("filtros_aplicados") // Texto plano o JSON string
-  formato          String    @db.VarChar(10)
-
-  @@map("kpi_auditoria_export")
-}
->>>>>>> origin/Carlos
