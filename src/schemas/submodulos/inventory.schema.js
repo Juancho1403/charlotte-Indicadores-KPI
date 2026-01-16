@@ -6,6 +6,10 @@ export const getParetoSchema = z.object({
         date_from: z.string().date().optional(),
         date_to: z.string().date().optional(),
         store_id: z.coerce.number().optional(),
+
+        // --- AGREGADO: Para la Tarea 2.5 (Invalidar Caché) ---
+        // Acepta "true" (string) o true (boolean)
+        force_refresh: z.union([z.string(), z.boolean()]).optional(),
     }),
 });
 

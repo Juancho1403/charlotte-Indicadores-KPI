@@ -1,0 +1,62 @@
+import { Worker } from 'bullmq';
+import { envs } from '../config/envs.js';
+import { connectRedisIfAvailable } from '../utils/redis.util.js';
+
+const DISABLE_REDIS = String(process.env.DISABLE_REDIS || '').toLowerCase() === 'true';
+
+
+/**
+ * Tarea 4.5: Ingesta de Eventos.
+ * Escucha la cola 'kpi_events' para patrones de comanda y pagos.
+ */
+export const initEventWorker = async () => {
+  if (DISABLE_REDIS) {
+    console.warn('⚠️ initEventWorker: DISABLE_REDIS=true -> no iniciar Event Worker');
+    return;
+  }
+  const REDIS_URL = process.env.REDIS_URL || `redis://${envs.REDIS_HOST || '127.0.0.1'}:${envs.REDIS_PORT || 6379}`;
+  try {
+    const connection = await connectRedisIfAvailable(REDIS_URL, undefined, 800);
+    if (!connection) {
+      console.warn('⚠️ initEventWorker: Redis no responde, Event Worker no arrancado');
+      return;
+    }
+
+    const worker = new Worker('kpi_events', async (job) => {
+      console.log(`📥 [Redis] Procesando evento: ${job.name}`);
+
+      try {
+        // 1. Patrón 'comanda.*'
+        if (job.name.startsWith('comanda.')) {
+          console.log(`🍔 Comanda actualizada. ID: ${job.data?.id || 'Desconocido'}`);
+          // Aquí iría la lógica de DB para contadores
+          return { processed: true, type: 'COMANDA_UPDATE' };
+        }
+
+        // 2. Evento específico 'note.paid'
+        if (job.name === 'note.paid') {
+          console.log(`💰 Pago registrado. Monto: ${job.data?.amount || 0}`);
+          // Aquí iría la lógica de DB para ingresos
+          return { processed: true, type: 'PAYMENT_RECEIVED' };
+        }
+
+      } catch (error) {
+        console.error(`❌ Error en job ${job.id}:`, error);
+      }
+    }, {
+      connection,
+      autorun: true
+    });
+
+    worker.on('ready', () => {
+      console.log('👷 Event Worker (Redis) está LISTO y escuchando.');
+    });
+
+    worker.on('error', (err) => {
+      // Usamos warn para no detener el servidor si no hay Redis local
+      console.warn('⚠️ Worker Error (Revisar conexión Redis):', err && err.message ? err.message : err);
+    });
+  } catch (err) {
+    console.warn('⚠️ No se pudo inicializar Event Worker (posible Redis no disponible):', err && err.message ? err.message : err);
+  }
+};

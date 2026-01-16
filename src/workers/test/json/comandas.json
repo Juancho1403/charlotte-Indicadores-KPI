@@ -1,0 +1,18 @@
+[
+  {
+    "id": 501,
+    "status": "DELIVERED",
+    "sent_at": "2025-12-16T12:00:00Z",
+    "delivered_at": "2025-12-16T12:12:00Z",
+    "table_number": 10,
+    "metrics": { "service_time_minutes": 12, "is_delayed": false }
+  },
+  {
+    "id": 505,
+    "status": "COOKING",
+    "sent_at": "2025-12-16T18:30:00Z",
+    "delivered_at": "2025-12-16T19:00:00Z",
+    "table_number": 5,
+    "metrics": { "elapsed_minutes": 30, "is_delayed": true, "target_time_minutes": 15 }
+  }
+]

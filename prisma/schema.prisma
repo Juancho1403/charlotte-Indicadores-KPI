@@ -1,7 +1,5 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-  
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -28,7 +26,7 @@ enum KpiSeverity {
 }
 
 // --------------------------------------------------------
-// MODELOS / TABLAS
+// KPI MODULE TABLES (From SQL Script)
 // --------------------------------------------------------
 
 // 2.1 Metas Financieras
@@ -95,10 +93,63 @@ model KpiAlertaHistorial {
 model KpiAuditoriaExport {
   idExport         Int       @id @default(autoincrement()) @map("id_export")
   usuarioId        Int       @map("usuario_id")
-  // usuario       User      @relation(...) // Relación con tabla User si existiera en este esquema o fuera externa
+  // Relation to external User model
+  usuario          User      @relation(fields: [usuarioId], references: [id])
   fechaHora        DateTime? @default(now()) @map("fecha_hora")
-  filtrosAplicados String?   @map("filtros_aplicados") // Texto plano o JSON string
+  filtrosAplicados String?   @map("filtros_aplicados")
   formato          String    @db.VarChar(10)
 
   @@map("kpi_auditoria_export")
+}
+
+// --------------------------------------------------------
+// EXTERNAL MODELS (STUBS FOR COMPILATION)
+// These models are assumed to exist in the database or are needed
+// for strict typing in the application logic.
+// --------------------------------------------------------
+
+model User {
+  id    Int     @id @default(autoincrement())
+  email String  @unique
+  name  String?
+  role  String  @default("USER")
+
+  // Relations
+  exports KpiAuditoriaExport[]
+
+  @@map("usuario") // Mapping to existing table if present
+}
+
+model Order {
+  id          Int       @id @default(autoincrement())
+  waiterId    Int?      @map("waiter_id")
+  total       Decimal?  @db.Decimal(10, 2)
+  status      String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  finishedAt  DateTime? @map("finished_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@map("orders") // Assumed table name
+}
+
+model DpNote {
+  id          Int      @id @default(autoincrement())
+  totalAmount Decimal  @map("total_amount")
+  status      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("dp_notes") // Assumed table name
+}
+
+// 2.8 Gestion de archivos (Required for Reports Worker)
+model ReportLog {
+  id             String   @id @default(uuid())
+  status         String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  type           String   @db.VarChar(50) // Ej: "REPORTE_KPI"
+  fileUrl        String?  @map("file_url") // URL de S3
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("report_logs")
 }
