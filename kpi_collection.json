@@ -1,0 +1,336 @@
+{
+	"info": {
+		"_postman_id": "00000000-0000-0000-0000-000000000000",
+		"name": "Charlotte KPI Module",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Dashboard",
+			"item": [
+				{
+					"name": "Get Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/dashboard/summary?date=2023-10-25&store_id=1&force_refresh=true",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "dashboard", "summary"],
+							"query": [
+								{ "key": "date", "value": "2023-10-25" },
+								{ "key": "store_id", "value": "1" },
+                                { "key": "force_refresh", "value": "true" }
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Range Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/dashboard/summary/range?date_from=2023-10-01&date_to=2023-10-31&granularity=DAY&store_id=1",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "dashboard", "summary", "range"],
+							"query": [
+								{ "key": "date_from", "value": "2023-10-01" },
+								{ "key": "date_to", "value": "2023-10-31" },
+								{ "key": "granularity", "value": "DAY" },
+                                { "key": "store_id", "value": "1" }
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Operations",
+			"item": [
+				{
+					"name": "Staff Ranking",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/operations/staff-ranking?sort_by=EFFICIENCY&shift=MORNING",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "operations", "staff-ranking"],
+							"query": [
+								{ "key": "sort_by", "value": "EFFICIENCY" },
+                                { "key": "shift", "value": "MORNING" }
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "SLA Breakdown",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/operations/sla-breakdown",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "operations", "sla-breakdown"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Staff Metrics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/operations/staff-metrics/1?date_from=2023-01-01&date_to=2023-01-31",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "operations", "staff-metrics", "1"],
+                            "query": [
+								{ "key": "date_from", "value": "2023-01-01" },
+                                { "key": "date_to", "value": "2023-01-31" }
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Inventory",
+			"item": [
+				{
+					"name": "Pareto Analysis",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/inventory/pareto?limit=5",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "inventory", "pareto"],
+                            "query": [
+                                { "key": "limit", "value": "5" }
+                            ]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Inventory Alerts",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/inventory/alerts?severity=WARNING",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "inventory", "alerts"],
+							"query": [
+								{ "key": "severity", "value": "WARNING" }
+							]
+						}
+					},
+					"response": []
+				},
+                {
+					"name": "Item Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/inventory/items/ITEM-001",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "inventory", "items", "ITEM-001"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+        {
+			"name": "Configuration",
+			"item": [
+				{
+					"name": "Update Goal",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"target_amount\": 5000,\n    \"end_date\": \"2025-12-31\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/configuration/goals/1",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "configuration", "goals", "1"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Threshold",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"value_warning\": 10,\n    \"value_critical\": 20\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/configuration/thresholds/sales_min",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "configuration", "thresholds", "sales_min"]
+						}
+					},
+					"response": []
+				},
+                {
+					"name": "Get Rules Data",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/configuration/data/metric1",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "configuration", "data", "metric1"]
+						}
+					},
+					"response": []
+				},
+                {
+					"name": "Update Rules Data",
+					"request": {
+						"method": "POST",
+						"header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+							"mode": "raw",
+							"raw": "{\n    \"value_warning\": 5,\n    \"value_critical\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/configuration/data/metric1",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "configuration", "data", "metric1"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+        {
+			"name": "Reports",
+			"item": [
+				{
+					"name": "Export Report",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"report_type\": \"SALES\",\n    \"start_date\": \"2023-10-01\",\n    \"end_date\": \"2023-10-31\",\n    \"format\": \"CSV\",\n    \"store_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/reports/export",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "reports", "export"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/reports/jobs/job-123",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "reports", "jobs", "job-123"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+        {
+			"name": "Alerts",
+			"item": [
+				{
+					"name": "Create Alert",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"metric\": \"wait_time\",\n    \"severity\": \"WARNING\",\n    \"message\": \"Wait time high\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/alerts",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "alerts"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Alert History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/alerts/history?severity=WARNING",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "alerts", "history"],
+                            "query": [
+                                { "key": "severity", "value": "WARNING" }
+                            ]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+        {
+			"name": "Events",
+			"item": [
+				{
+					"name": "Ingest Event",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"event_id\": \"evt-001\",\n    \"event\": \"ORDER_CREATED\",\n    \"payload\": { \"orderId\": 123 },\n    \"source\": \"kitchen\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/kpi/events",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "kpi", "events"]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		}
+	]
+}

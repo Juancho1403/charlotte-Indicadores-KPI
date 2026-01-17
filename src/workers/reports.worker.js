@@ -41,7 +41,7 @@ export async function startReportsWorker() {
   try {
     connection = await connectRedisIfAvailable(REDIS_URL, redisOptions, 800);
     if (!connection) {
-      console.warn('⚠️ reports.worker: Redis no disponible (timeout), worker no arrancado');
+      console.warn('⚠️ reports.worker: Redis no disponible (timeout) - Continuando sin sistema de reportes en segundo plano.');
       return null;
     }
 

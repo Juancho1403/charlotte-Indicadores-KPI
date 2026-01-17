@@ -37,6 +37,10 @@ app.use(express.static('public'));
 app.use(morgan('dev'));
 
 // Rutas base
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', service: 'KPI-Backend', uptime: process.uptime() });
+});
+
 app.get('/api', (req, res) => {
   res.json({ up: true });
 });
@@ -73,6 +77,7 @@ app.use('/api/v1/kpi', kpiRoutes);
 
     server.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
+      console.log(`> Local: http://localhost:${PORT}`);
     });
   } catch (err) {
     console.error('Fallo al iniciar la aplicación:', err);
