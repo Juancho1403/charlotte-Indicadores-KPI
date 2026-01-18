@@ -10,8 +10,18 @@ import { initSocket } from './utils/socket.util.js'; // [NEW] Importar Socket
 import { initEventWorker } from './workers/event.worker.js'; // [NEW] Importar Worker Eventos
 import startReportsWorker from './workers/reports.worker.js';
 import { prisma } from './db/client.js'; // [NEW] Importar Prisma Client
+import cors from 'cors';
 
 const app = express();
+
+const corsOptions = {
+  origin: 'https://interfaces-control.vercel.app', // Permitir todas las fuentes (ajustar según sea necesario)
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
 
 // --- 3. CONFIGURACIÓN WEBSOCKET (Tarea 3.6) ---
 // En lugar de dejar que Express cree el servidor solo, lo creamos explícitamente con http
