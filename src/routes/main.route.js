@@ -10,6 +10,7 @@ import alertsRoutes from './submodulos/alerts.route.js';
 import eventsRoutes from './submodulos/events.route.js';
 import analyticsRoutes from './submodulos/analytics.route.js';
 import webhooksRoutes from './submodulos/webhooks.route.js';
+import authRoutes from './submodulos/auth.route.js';
 
 const router = Router();
 
@@ -30,5 +31,6 @@ router.use('/alerts', alertsRoutes);
 router.use('/events', eventsRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/webhooks', webhooksRoutes);
+router.use('/auth', authRoutes);
 
 export default router;

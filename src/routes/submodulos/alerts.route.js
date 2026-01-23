@@ -12,6 +12,13 @@ const router = Router();
  *     responses:
  *       201:
  *         description: Alerta creada.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 alert_id: { type: integer, example: 5001 }
  */
 router.post('/', alertsController.createAlert);
 
@@ -24,6 +31,16 @@ router.post('/', alertsController.createAlert);
  *     responses:
  *       200:
  *         description: Lista de alertas históricas.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/InventoryAlert'
  */
 router.get('/history', alertsController.getHistory);
 
