@@ -1,72 +1,41 @@
 import fetch from 'node-fetch';
 import { prisma } from '../../db/client.js';
+import { envs } from '../../config/envs.js';
 import { minutesBetween, isSameUtcDate } from "../../utils/timeHelpers.js"
 
 const COMANDAS_API_URL = process.env.COMANDAS_API_URL || 'http://localhost:3000/comandas';
 
 export const getStaffRanking = async (filters) => {
     const { sort_by = 'EFFICIENCY', limit = 20, page = 1 } = filters;
-    
-    // 1. Obtener ordenes agrupadas por waiterId
-    // Nota: Prisma no soporta group by + relation fácilmente, lo haremos en 2 pasos o con groupBy puro.
-    // Asumimos que Order tiene campo waiterId y finishedAt (para tiempos).
-    
+
     try {
-        const groupings = await prisma.order.groupBy({
-            by: ['waiterId'],
-            _count: { id: true },
-            _avg: { total: true }, // Usamos total como proxy de complejidad si no tenemos tiempos exactos aun
-            where: {
-                status: 'COMPLETED', // Asumiendo estado
-                waiterId: { not: null }
-            },
-            take: Number(limit) * Number(page), // Cargar suficiente
-        });
-
-        // Simular info de usuarios (ya que no tenemos tabla User linkeada facilmente o es externa)
-        // En prod, haríamos un .findMany en User con los IDs.
-        const ranking = groupings.map(g => {
-            const totalOrders = g._count.id;
-            const avgTime = 5.0; // Mock simulado, idealmente AVG(finishedAt - createdAt)
-            const errors = 0; 
-            
-            // Formula Efficiency: (Orders * 1) - (AvgTime * 0.5) - (Errors * 2) (Ejemplo)
-            const score = Math.min(100, Math.max(0, 50 + (totalOrders * 2) - (avgTime * 2)));
-
-            return {
-                waiter_id: `W-${g.waiterId}`,
-                name: `Staff ${g.waiterId}`, // Placeholder
-                total_orders: totalOrders,
-                avg_time_minutes: avgTime,
-                efficiency_score: Math.round(score),
-                current_status: "ACTIVE"
-            };
-        });
-
-        // Ordenar
-        ranking.sort((a, b) => sort_by === 'VOLUME' 
-            ? b.total_orders - a.total_orders 
-            : b.efficiency_score - a.efficiency_score
-        );
+        const kdsUrl = process.env.KDS_BASE_URL || 'https://charlotte-cocina.onrender.com';
+        // Consumir API de Personal
+        const res = await fetch(`${kdsUrl}/staff`);
+        if (!res.ok) throw new Error(`Staff API error: ${res.status}`);
+        
+        const staffList = await res.json(); // Se asume returns Array
+        // Mapear a formato ranking
+        // En un mundo ideal cruzamos con /kds/history para sacar métricas reales.
+        // Por ahora asignamos métricas placeholder sobre los usuarios reales encontrados.
+        const ranking = staffList.map(s => ({
+             waiter_id: s.id || s._id,
+             name: s.name || s.nombre || 'Staff',
+             total_orders: Math.floor(Math.random() * 50) + 10, // Placeholder
+             avg_time_minutes: Math.floor(Math.random() * 15) + 5, // Placeholder
+             efficiency_score: 85,
+             current_status: "ACTIVE"
+        }));
 
         return {
             success: true,
-            data: ranking.slice((page - 1) * limit, page * limit),
-            meta: { total_items: ranking.length, current_page: page, per_page: limit }
+            data: ranking.slice(0, Number(limit)),
+            meta: { total_items: ranking.length }
         };
 
     } catch (e) {
-        console.error("Error en StaffRanking (Usando Mock):", e.message);
-        // Fallback Mock Data
-        const ranking = [
-            { waiter_id: "W-101", name: "Juan Perez", total_orders: 45, avg_time_minutes: 12.5, efficiency_score: 95, current_status: "ACTIVE" },
-            { waiter_id: "W-102", name: "Maria Garcia", total_orders: 38, avg_time_minutes: 14.2, efficiency_score: 88, current_status: "ACTIVE" }
-        ];
-        return {
-            success: true,
-            data: ranking,
-            meta: { total_items: ranking.length, current_page: page, per_page: limit }
-        };
+        console.warn("KDS Staff Error:", e.message);
+        return { success: false, data: [] };
     }
 };
 

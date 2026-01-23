@@ -1,0 +1,9 @@
+name,description,sources,suggested_frequency_seconds
+total_sales,"Ingresos totales en un periodo","atencion-cliente:/comandas;delivery:/orders",300
+sales_by_hour,"Ventas agrupadas por hora","atencion-cliente:/comandas;delivery:/orders",300
+avg_ticket,"Ticket promedio (AOV)","atencion-cliente:/comandas;delivery:/orders",900
+orders_by_status,"Conteo de órdenes por estado","atencion-cliente:/comandas;delivery:/orders;kds:/kds/queue",30
+staff_ranking,"Ranking de personal por órdenes y tiempo promedio","kds:/staff;atencion-cliente:/comandas",300
+kds_queue_length,"Longitud del queue de KDS","kds:/kds/queue",15
+product_top_sellers,"Top N productos vendidos","atencion-cliente:/comandas;delivery:/orders;inventory:/products",900
+inventory_low_items,"Ítems con stock bajo","inventory:/inventory/items",60

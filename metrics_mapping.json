@@ -1,0 +1,78 @@
+{
+  "prefix_base": "/api/v1/kpi",
+  "metrics": [
+    {
+      "name": "total_sales",
+      "description": "Ingresos totales en un periodo (suma monto_total)",
+      "sources": [
+        { "service": "atencion-cliente", "endpoint": "/comandas", "fields": ["timestamp_creation","monto_total","lines"] },
+        { "service": "delivery", "endpoint": "/orders", "fields": ["timestamp_creation","monto_total","lines"] }
+      ],
+      "suggested_frequency_seconds": 300
+    },
+    {
+      "name": "sales_by_hour",
+      "description": "Ventas agrupadas por hora",
+      "sources": [
+        { "service": "atencion-cliente", "endpoint": "/comandas", "fields": ["timestamp_creation","monto_total"] },
+        { "service": "delivery", "endpoint": "/orders", "fields": ["timestamp_creation","monto_total"] }
+      ],
+      "suggested_frequency_seconds": 300
+    },
+    {
+      "name": "avg_ticket",
+      "description": "Ticket promedio (AOV)",
+      "sources": [
+        { "service": "atencion-cliente", "endpoint": "/comandas", "fields": ["monto_total"] },
+        { "service": "delivery", "endpoint": "/orders", "fields": ["monto_total"] }
+      ],
+      "suggested_frequency_seconds": 900
+    },
+    {
+      "name": "orders_by_status",
+      "description": "Conteo de órdenes por estado (PENDING, IN_KITCHEN, READY, DELIVERED, CANCELLED)",
+      "sources": [
+        { "service": "atencion-cliente", "endpoint": "/comandas", "fields": ["status","timestamp_creation"] },
+        { "service": "delivery", "endpoint": "/orders", "fields": ["current_status","timestamp_creation"] },
+        { "service": "kds", "endpoint": "/kds/queue", "fields": ["status"] }
+      ],
+      "suggested_frequency_seconds": 30
+    },
+    {
+      "name": "staff_ranking",
+      "description": "Ranking de personal por órdenes y tiempo promedio",
+      "sources": [
+        { "service": "kds", "endpoint": "/staff", "fields": ["id","name"] },
+        { "service": "atencion-cliente", "endpoint": "/comandas", "fields": ["waiter_id","timestamps","lines"] }
+      ],
+      "suggested_frequency_seconds": 300
+    },
+    {
+      "name": "kds_queue_length",
+      "description": "Longitud del queue de KDS",
+      "sources": [
+        { "service": "kds", "endpoint": "/kds/queue", "fields": ["task_id","status","station"] }
+      ],
+      "suggested_frequency_seconds": 15
+    },
+    {
+      "name": "product_top_sellers",
+      "description": "Top N productos vendidos por periodo",
+      "sources": [
+        { "service": "atencion-cliente", "endpoint": "/comandas", "fields": ["lines"] },
+        { "service": "delivery", "endpoint": "/orders", "fields": ["lines"] },
+        { "service": "inventory", "endpoint": "/products", "fields": ["id","name"] }
+      ],
+      "suggested_frequency_seconds": 900
+    },
+    {
+      "name": "inventory_low_items",
+      "description": "Conteo de ítems con stock bajo",
+      "sources": [
+        { "service": "inventory", "endpoint": "/inventory/items", "fields": ["id","quantity_on_hand","reorder_threshold"] },
+        { "service": "inventory", "endpoint": "/inventory/items/{id}/logs", "fields": ["qty","reason"] }
+      ],
+      "suggested_frequency_seconds": 60
+    }
+  ]
+}

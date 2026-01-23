@@ -10,6 +10,8 @@ import { initSocket } from './utils/socket.util.js'; // [NEW] Importar Socket
 import { initEventWorker } from './workers/event.worker.js'; // [NEW] Importar Worker Eventos
 import startReportsWorker from './workers/reports.worker.js';
 import { prisma } from './db/client.js'; // [NEW] Importar Prisma Client
+import swaggerUi from 'swagger-ui-express';
+import swaggerSpec from './config/swagger.js';
 
 const app = express();
 
@@ -41,9 +43,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'KPI-Backend', uptime: process.uptime() });
 });
 
-app.get('/api', (req, res) => {
-  res.json({ up: true });
-});
+// Documentación Swagger
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+console.log('[SWAGGER] Docs disponibles en /docs');
+
 
 const PORT = envs?.PORT || process.env.PORT || 3000;
 
@@ -79,6 +82,15 @@ app.use('/api/v1/kpi', kpiRoutes);
       console.log(`Server listening on port ${PORT}`);
       console.log(`> Local: http://localhost:${PORT}`);
     });
+    // Start KPI poller automatically when in mock mode or when explicitly enabled
+    try {
+      if (String(process.env.START_KPI_POLLER || '').toLowerCase() === 'true' || envs.USE_MOCK_SERVICES) {
+        const { startKpiPoller } = await import('./workers/kpiPoller.js');
+        startKpiPoller({ intervalSec: Number(process.env.KPI_POLLER_INTERVAL_SEC || 60) });
+      }
+    } catch (e) {
+      console.warn('Could not start KPI poller:', e.message || e);
+    }
   } catch (err) {
     console.error('Fallo al iniciar la aplicación:', err);
     process.exit(1);

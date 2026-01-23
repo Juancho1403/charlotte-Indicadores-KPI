@@ -8,6 +8,8 @@ import configurationRoutes from './submodulos/configuration.route.js';
 import reportsRoutes from './submodulos/reports.route.js';
 import alertsRoutes from './submodulos/alerts.route.js';
 import eventsRoutes from './submodulos/events.route.js';
+import analyticsRoutes from './submodulos/analytics.route.js';
+import webhooksRoutes from './submodulos/webhooks.route.js';
 
 const router = Router();
 
@@ -26,5 +28,7 @@ router.use('/configuration', configurationRoutes);
 router.use('/reports', reportsRoutes);
 router.use('/alerts', alertsRoutes);
 router.use('/events', eventsRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/webhooks', webhooksRoutes);
 
 export default router;

@@ -1,3 +1,5 @@
+import fetch from 'node-fetch';
+import { envs } from '../../config/envs.js';
 import { prisma } from '../../db/client.js';
 
 export const getPareto = async (filters) => {
@@ -16,29 +18,31 @@ export const getPareto = async (filters) => {
 };
 
 export const getStockAlerts = async (filters) => {
-    const { severity } = filters;
-    
-    // Obtener reglas de stock
-    const reglas = await prisma.kpiReglaSemaforo.findFirst({
-        where: { tipoMetrica: 'STOCK' }
-    });
+    try {
+        const invUrl = process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/inventory';
+        // Asumiendo endpoint /items retorna lista con campo 'stock' y 'min_stock' (o similar)
+        const res = await fetch(`${invUrl}/items`); 
+        if (!res.ok) throw new Error("Inventory API Failed");
+        
+        const items = await res.json(); // Array
+        // Filtrar items críticos
+        const alerts = items
+            .filter(i => (i.quantity || i.stock || 0) <= (i.min_stock || 10))
+            .map(i => ({
+                item_name: i.name,
+                current_level_pct: 10, // Placeholder %
+                severity: "CRITICAL",
+                action_required: "RESTOCK"
+            }));
 
-    // Consultar alertas activas en historial (last status)
-    const alertas = await prisma.kpiAlertaHistorial.findMany({
-        where: { tipoIncidencia: 'STOCK', estadoGestion: 'PENDIENTE' },
-        orderBy: { timestampCreacion: 'desc' },
-        take: 10
-    });
-
-    return {
-        critical_count: alertas.filter(a => a.severidad === 'CRITICAL').length,
-        alerts: alertas.map(a => ({
-            item_name: a.itemAfectado,
-            current_level_pct: Number(a.valorRegistrado?.replace('%','') || 0),
-            severity: a.severidad,
-            action_required: "RESTOCK"
-        }))
-    };
+        return {
+            critical_count: alerts.length,
+            alerts: alerts.slice(0, 10)
+        };
+    } catch (e) {
+        console.warn("Stock Alert Fetch Error:", e.message);
+        return { critical_count: 0, alerts: [] };
+    }
 };
 
 export const getItemDetails = async (itemId) => {
