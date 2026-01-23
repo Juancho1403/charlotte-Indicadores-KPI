@@ -1,6 +1,7 @@
 import http from 'http'; // [NEW] Importar http
 import express from 'express';
 import bodyParser from 'body-parser';
+import cors from 'cors';
 import { envs } from './config/envs.js';
 import morgan from 'morgan';
 import scheduleDailyKpiJob from './workers/KpiDailyWorker.js';

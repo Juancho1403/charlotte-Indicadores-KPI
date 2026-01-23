@@ -18,7 +18,7 @@ const options = {
         description: 'Servidor Local',
       },
       {
-        url: 'https://charlotte-indicadores-kpi.onrender.com', // Ajustar si tienes la url real
+        url: 'https://charlotte-indicadores-kpi.onrender.com',
         description: 'Producción',
       }
     ],
