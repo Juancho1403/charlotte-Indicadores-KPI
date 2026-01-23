@@ -15,6 +15,15 @@ import swaggerSpec from './config/swagger.js';
 
 const app = express();
 
+const corsOptions = {
+  origin: 'https://interfaces-control.vercel.app', // Permitir todas las fuentes (ajustar según sea necesario)
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+
 // --- 3. CONFIGURACIÓN WEBSOCKET (Tarea 3.6) ---
 // En lugar de dejar que Express cree el servidor solo, lo creamos explícitamente con http
 const server = http.createServer(app); 
