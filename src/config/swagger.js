@@ -14,8 +14,12 @@ const options = {
     },
     servers: [
       {
-        url: process.env.PUBLIC_URL || `http://localhost:${envs.PORT}`,
-        description: 'Servidor Principal',
+        url: 'https://charlotte-indicadores-kpi.onrender.com',
+        description: 'Servidor Producción (Render)',
+      },
+      {
+        url: `http://localhost:${envs.PORT}`,
+        description: 'Servidor Local (Dev)',
       }
     ],
     components: {
