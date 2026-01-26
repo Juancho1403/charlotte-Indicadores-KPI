@@ -60,9 +60,38 @@ export async function startReportsWorker() {
       data: { status: 'PROCESSING' }
     });
 
-    // B. GENERAR ARCHIVO (Simulación de creación real)
-    // En producción, aquí iría PDFKit. Aquí creamos el archivo físico para poder subirlo.
-    await fs.writeFile(tempPath, `Contenido del reporte ID: ${reportId}\nDatos: ${JSON.stringify(content)}`);
+    // B. GENERAR DATOS (Agregación de APIs Externas)
+    let aggregatedData = [];
+    try {
+        const targetDateStr = content.start_date || new Date().toISOString().slice(0, 10);
+        
+        // Fetch Sala
+        const atClientBaseUrl = process.env.AT_CLIENT_BASE_URL || envs.AT_CLIENT_BASE_URL || 'https://charlotte-atencion-cliente.onrender.com/api/v1/atencion-cliente';
+        const resAt = await axios.get(`${atClientBaseUrl}/comandas`);
+        if (resAt.status === 200) {
+            const dataAt = Array.isArray(resAt.data) ? resAt.data : (resAt.data.data || []);
+            aggregatedData.push(...dataAt.map(c => ({ ...c, source: 'SALA' })));
+        }
+
+        // Fetch Delivery
+        const deliveryBaseUrl = process.env.DELIVERY_BASE_URL || envs.DELIVERY_BASE_URL || 'https://delivery-pickup.onrender.com/api/dp/v1';
+        const resDel = await axios.get(`${deliveryBaseUrl}/orders?date=${targetDateStr}`);
+        if (resDel.status === 200) {
+            const dataDel = Array.isArray(resDel.data) ? resDel.data : (resDel.data.data || []);
+            aggregatedData.push(...dataDel.map(o => ({ ...o, source: 'DELIVERY' })));
+        }
+    } catch (e) {
+        console.warn(`⚠️ [Job ${job.id}] Error al agregar datos externos: ${e.message}`);
+    }
+
+    // C. GENERAR ARCHIVO (CSV/Text)
+    const reportContent = `Reporte de Transacciones - ${type}\n` +
+                          `Generado: ${new Date().toISOString()}\n` +
+                          `-----------------------------------\n` +
+                          `ID,Fuente,Total,Fecha\n` +
+                          aggregatedData.map(d => `${d.id || d._id},${d.source},${d.total || d.monto_total || 0},${d.created_at || d.createdAt || ''}`).join('\n');
+
+    await fs.writeFile(tempPath, reportContent);
 
     // C. SUBIR A AWS S3
     const fileBuffer = await fs.readFile(tempPath);

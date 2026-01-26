@@ -16,10 +16,6 @@ const options = {
       {
         url: 'https://charlotte-indicadores-kpi.onrender.com',
         description: 'Servidor Producción (Render)',
-      },
-      {
-        url: `http://localhost:${envs.PORT}`,
-        description: 'Servidor Local (Dev)',
       }
     ],
     components: {

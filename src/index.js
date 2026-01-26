@@ -57,6 +57,11 @@ app.get('/health', (req, res) => {
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 console.log('[SWAGGER] Docs disponibles en /docs');
 
+// Redirección de raíz a documentación
+app.get('/', (req, res) => {
+  res.redirect('/docs');
+});
+
 
 const PORT = envs?.PORT || process.env.PORT || 3000;
 

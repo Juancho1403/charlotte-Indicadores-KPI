@@ -5,36 +5,33 @@ const router = Router();
 
 /**
  * @swagger
+ * tags:
+ *   name: Dashboard
+ *   description: Métricas principales para el tablero de control
+ */
+
+/**
+ * @swagger
  * /api/v1/kpi/dashboard/summary:
  *   get:
- *     summary: Obtener resumen ejecutivo del dashboard
+ *     summary: Obtener resumen del dashboard
  *     tags: [Dashboard]
  *     parameters:
  *       - in: query
- *         name: date
+ *         name: period
  *         schema:
  *           type: string
- *           format: date
- *         description: Fecha de consulta (YYYY-MM-DD)
+ *           enum: [today, week, month]
+ *         description: Período de tiempo para el resumen (default today)
  *     responses:
  *       200:
- *         description: Objeto con métricas de ingresos, operaciones y metas.
+ *         description: Resumen exitoso
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/DashboardSummary'
- *       400:
- *         description: Error en la solicitud.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *               $ref: '#/components/schemas/DashboardSummary'
+ *       500:
+ *         description: Error del servidor
  */
 router.get('/summary', dashboardController.getSummary);
 

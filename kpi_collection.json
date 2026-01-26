@@ -14,11 +14,11 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/v1/kpi/dashboard/summary?date=2023-10-25&store_id=1&force_refresh=true",
+							"raw": "{{base_url}}/api/v1/kpi/dashboard/summary?date=2026-01-24&store_id=1&force_refresh=true",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "kpi", "dashboard", "summary"],
 							"query": [
-								{ "key": "date", "value": "2023-10-25" },
+								{ "key": "date", "value": "2026-01-24" },
 								{ "key": "store_id", "value": "1" },
                                 { "key": "force_refresh", "value": "true" }
 							]
@@ -32,12 +32,12 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/v1/kpi/dashboard/summary/range?date_from=2023-10-01&date_to=2023-10-31&granularity=DAY&store_id=1",
+							"raw": "{{base_url}}/api/v1/kpi/dashboard/summary/range?date_from=2026-01-01&date_to=2026-01-24&granularity=DAY&store_id=1",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "kpi", "dashboard", "summary", "range"],
 							"query": [
-								{ "key": "date_from", "value": "2023-10-01" },
-								{ "key": "date_to", "value": "2023-10-31" },
+								{ "key": "date_from", "value": "2026-01-01" },
+								{ "key": "date_to", "value": "2026-01-24" },
 								{ "key": "granularity", "value": "DAY" },
                                 { "key": "store_id", "value": "1" }
 							]
@@ -236,7 +236,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"report_type\": \"SALES\",\n    \"start_date\": \"2023-10-01\",\n    \"end_date\": \"2023-10-31\",\n    \"format\": \"CSV\",\n    \"store_id\": 1\n}"
+							"raw": "{\n    \"report_type\": \"SALES\",\n    \"start_date\": \"2026-01-01\",\n    \"end_date\": \"2026-01-24\",\n    \"format\": \"CSV\",\n    \"store_id\": 1\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/api/v1/kpi/reports/export",

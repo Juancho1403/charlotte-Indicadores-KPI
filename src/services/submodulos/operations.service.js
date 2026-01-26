@@ -9,22 +9,26 @@ export const getStaffRanking = async (filters) => {
     const { sort_by = 'EFFICIENCY', limit = 20, page = 1 } = filters;
 
     try {
-        const kdsUrl = process.env.KDS_BASE_URL || 'https://charlotte-cocina.onrender.com';
+        const kitchBaseUrl = process.env.KITCHEN_BASE_URL || envs.KITCHEN_BASE_URL || 'https://charlotte-cocina.onrender.com/api';
+        const kdsUrl = `${kitchBaseUrl}/staff`;
         // Consumir API de Personal
-        const res = await fetch(`${kdsUrl}/staff`);
+        console.log("Fetching Kitchen Staff:", kdsUrl);
+        const res = await fetch(kdsUrl);
         if (!res.ok) throw new Error(`Staff API error: ${res.status}`);
         
-        const staffList = await res.json(); // Se asume returns Array
+        const json = await res.json();
+        const staffList = Array.isArray(json) ? json : (json.data || []);
         // Mapear a formato ranking
         // En un mundo ideal cruzamos con /kds/history para sacar métricas reales.
         // Por ahora asignamos métricas placeholder sobre los usuarios reales encontrados.
         const ranking = staffList.map(s => ({
-             waiter_id: s.id || s._id,
-             name: s.name || s.nombre || 'Staff',
-             total_orders: Math.floor(Math.random() * 50) + 10, // Placeholder
+             waiter_id: s.id || s._id || s.workerCode,
+             name: s.name || s.nombre || 'Personal de Cocina',
+             role: s.role || 'Staff',
+             total_orders: Math.floor(Math.random() * 50) + 10, // Placeholder hasta cruzar con /kds/history
              avg_time_minutes: Math.floor(Math.random() * 15) + 5, // Placeholder
              efficiency_score: 85,
-             current_status: "ACTIVE"
+             current_status: (s.status || 'ACTIVE').toUpperCase()
         }));
 
         return {

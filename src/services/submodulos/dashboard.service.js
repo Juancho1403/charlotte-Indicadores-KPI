@@ -13,8 +13,8 @@ export const getSummary = async (filters) => {
 
     // 1. Fetch Atencion Cliente (Sala)
     try {
-        const atClientUrl = `${process.env.AT_CLIENT_BASE_URL || envs.AT_CLIENT_BASE_URL}/comandas`; 
-        // Nota: Docs no especifican filtro de fecha en query param estándar, pero inyectamos ?date= por convención REST
+        const atClientBaseUrl = process.env.AT_CLIENT_BASE_URL || envs.AT_CLIENT_BASE_URL || 'https://charlotte-atencion-cliente.onrender.com/api/v1/atencion-cliente';
+        const atClientUrl = `${atClientBaseUrl}/comandas`; 
         console.log("Fetching Sala:", atClientUrl);
         const resAt = await fetch(atClientUrl);
         if (resAt.ok) {
@@ -31,15 +31,16 @@ export const getSummary = async (filters) => {
 
     // 2. Fetch Delivery
     try {
-        const delUrl = `${process.env.DELIVERY_BASE_URL || envs.DELIVERY_BASE_URL}/orders?date=${targetDateStr}`;
+        const deliveryBaseUrl = process.env.DELIVERY_BASE_URL || envs.DELIVERY_BASE_URL || 'https://delivery-pickup.onrender.com/api/dp/v1';
+        const delUrl = `${deliveryBaseUrl}/orders?date=${targetDateStr}`;
         console.log("Fetching Delivery:", delUrl);
         const resDel = await fetch(delUrl);
         if (resDel.ok) {
             const dataDel = await resDel.json();
-            const orders = Array.isArray(dataDel) ? dataDel : [];
+            const orders = Array.isArray(dataDel) ? dataDel : (dataDel.data || []);
             orders.forEach(o => {
-                if (o.current_status !== 'CANCELLED') {
-                    totalRevenue += Number(o.monto_total || 0);
+                if (o.current_status !== 'CANCELLED' && o.status !== 'CANCELLED') {
+                    totalRevenue += Number(o.monto_total || o.total || 0);
                     totalOrders++;
                 }
             });

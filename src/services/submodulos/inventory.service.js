@@ -19,19 +19,23 @@ export const getPareto = async (filters) => {
 
 export const getStockAlerts = async (filters) => {
     try {
-        const invUrl = process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/inventory';
+        const kitchBaseUrl = process.env.KITCHEN_BASE_URL || envs.KITCHEN_BASE_URL || 'https://charlotte-cocina.onrender.com/api';
+        const invUrl = `${kitchBaseUrl}/inventory/items`;
         // Asumiendo endpoint /items retorna lista con campo 'stock' y 'min_stock' (o similar)
-        const res = await fetch(`${invUrl}/items`); 
+        console.log("Fetching Inventory:", invUrl);
+        const res = await fetch(invUrl); 
         if (!res.ok) throw new Error("Inventory API Failed");
         
-        const items = await res.json(); // Array
+        const json = await res.json(); 
+        const items = Array.isArray(json) ? json : (json.data || []);
         // Filtrar items críticos
         const alerts = items
-            .filter(i => (i.quantity || i.stock || 0) <= (i.min_stock || 10))
+            .filter(i => (i.actual_stock || i.stock || i.quantity || 0) <= (i.standard_stock || i.min_stock || 10))
             .map(i => ({
+                item_id: i.id || i._id,
                 item_name: i.name,
-                current_level_pct: 10, // Placeholder %
-                severity: "CRITICAL",
+                current_level_pct: Math.round(((i.actual_stock || i.stock || 0) / (i.standard_stock || 100)) * 100) || 10,
+                severity: (i.actual_stock <= (i.standard_stock * 0.2)) ? "CRITICAL" : "WARNING",
                 action_required: "RESTOCK"
             }));
 
