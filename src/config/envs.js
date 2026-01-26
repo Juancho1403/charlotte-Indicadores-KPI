@@ -16,10 +16,14 @@ export const envs = {
     AWS_BUCKET_NAME: process.env.AWS_BUCKET_NAME,
     AWS_REGION: process.env.AWS_REGION || 'us-east-1',
     // --- Servicios externos ---
+    // Atención al Cliente: https://charlotte-atencion-cliente.onrender.com/docs/#/
     AT_CLIENT_BASE_URL: process.env.AT_CLIENT_BASE_URL || 'https://charlotte-atencion-cliente.onrender.com/api/v1/atencion-cliente',
-    KDS_BASE_URL: process.env.KDS_BASE_URL || 'https://charlotte-cocina.onrender.com', // Base para Cocina e Inventario
+    // Cocina (KDS): https://charlotte-cocina.onrender.com/api-docs/#/
+    KDS_BASE_URL: process.env.KDS_BASE_URL || 'https://charlotte-cocina.onrender.com/api/kitchen',
+    // Delivery/Pickup: https://delivery-pickup.onrender.com/docs/#/
     DELIVERY_BASE_URL: process.env.DELIVERY_BASE_URL || 'https://delivery-pickup.onrender.com/api/dp/v1',
-    INVENTORY_BASE_URL: process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/inventory', // Asumiendo que inventario vive en cocina o tiene ruta propia, ajustaremos si falla
+    // Inventario está en el módulo de Cocina
+    INVENTORY_BASE_URL: process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/api/kitchen',
     // Mock switch: si se establece a 'true' usará consumidores mock locales
     USE_MOCK_SERVICES: String(process.env.USE_MOCK_SERVICES || '').toLowerCase() === 'true'
 };
