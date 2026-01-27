@@ -5,6 +5,7 @@ import {
     fetchKdsHistory, 
     fetchComandas 
 } from '../consumers/externalConsumers.js';
+import { getAxiosAuthConfig } from './security_auth.service.js';
 
 /**
  * Obtener Ranking de Personal

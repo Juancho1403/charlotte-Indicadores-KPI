@@ -197,16 +197,17 @@ export async function fetchInventoryConsumption(params = {}) {
  * @param {Object} params - Query params: shift, status, active, etc.
  * @returns {Promise<Array>} Lista de personal
  */
-export async function fetchStaff(params = {}) {
-  if (envs.USE_MOCK_SERVICES) return mock.fetchStaff(params);
+export async function fetchStaff(params = {}, axiosConfig = {}) {
+  if (envs.USE_MOCK_SERVICES) return mock.fetchStaff(params, axiosConfig);
   // Si se solicita personal activo, usar endpoint específico
   if (params.active === true || params.active === 'true') {
     const url = `${envs.KDS_BASE_URL}/staff/active`;
-    const res = await axiosJson.get(url);
+    const res = await axiosJson.get(url, { params, ...axiosConfig });
     return res.data;
   }
   const url = `${envs.KDS_BASE_URL}/staff`;
-  const res = await axiosJson.get(url, { params });
+  const res = await axiosJson.get(url, { params, ...axiosConfig });
+  console.log(res.data);
   return res.data;
 }
 
@@ -296,22 +297,19 @@ export async function fetchAllDpNoteItems(params = {}) {
   // Obtener todas las órdenes en el rango de fechas
   const orders = await fetchDeliveryOrders(params);
   const ordersArray = Array.isArray(orders) ? orders : (orders?.data || []);
-  
-  // Extraer todos los items de todas las órdenes
-  const allItems = [];
-  ordersArray.forEach(order => {
-    const items = order.items || order.order_items || [];
-    items.forEach(item => {
-      allItems.push({
-        ...item,
-        note_id: order.id || order.order_id,
-        order_id: order.id || order.order_id,
-        created_at: order.created_at || order.timestamp_creation
-      });
-    });
-  });
-  
-  return allItems;
+
+  // Organizar en resumen por orden, enfocándose en monto total y detalles clave
+  return ordersArray.map(order => ({
+    order_id: order.id || order.order_id,
+    readable_id: order.readable_id,
+    customer_name: order.customer_name,
+    service_type: order.service_type,
+    current_status: order.current_status,
+    monto_total: order.monto_total || order.total_amount || order.total,
+    timestamp_creation: order.timestamp_creation || order.created_at,
+    // Opcional: incluir conteo de items si es relevante
+    items_count: (order.items || order.order_items || []).length
+  }));
 }
 
 /**
