@@ -16,27 +16,94 @@ export const getStaffRanking = async (filters) => {
     const { sort_by = 'EFFICIENCY', limit = 20, page = 1, shift } = filters;
 
     try {
-        const kitchBaseUrl = process.env.KITCHEN_BASE_URL || envs.KITCHEN_BASE_URL || 'https://charlotte-cocina.onrender.com/api';
-        const kdsUrl = `${kitchBaseUrl}/staff`;
-        // Consumir API de Personal
-        console.log("Fetching Kitchen Staff:", kdsUrl);
-        const res = await fetch(kdsUrl);
-        if (!res.ok) throw new Error(`Staff API error: ${res.status}`);
+        // 1. Obtener lista de staff del módulo Cocina
+        const staffParams = shift ? { shift } : {};
+        const axiosAuthConfig = await getAxiosAuthConfig(filters?.authorization);
+        const staffData = await fetchStaff(staffParams, axiosAuthConfig);
+        const staffList = Array.isArray(staffData) ? staffData : (staffData?.data || []);
         
-        const json = await res.json();
-        const staffList = Array.isArray(json) ? json : (json.data || []);
-        // Mapear a formato ranking
-        // En un mundo ideal cruzamos con /kds/history para sacar métricas reales.
-        // Por ahora asignamos métricas placeholder sobre los usuarios reales encontrados.
-        const ranking = staffList.map(s => ({
-             waiter_id: s.id || s._id || s.workerCode,
-             name: s.name || s.nombre || 'Personal de Cocina',
-             role: s.role || 'Staff',
-             total_orders: Math.floor(Math.random() * 50) + 10, // Placeholder hasta cruzar con /kds/history
-             avg_time_minutes: Math.floor(Math.random() * 15) + 5, // Placeholder
-             efficiency_score: 85,
-             current_status: (s.status || 'ACTIVE').toUpperCase()
-        }));
+        if (staffList.length === 0) {
+            return {
+                success: true,
+                data: [],
+                meta: { total_items: 0, current_page: Number(page), per_page: Number(limit) }
+            };
+        }
+
+        // 2. Obtener historial de KDS para calcular métricas reales
+        const kdsHistoryData = await fetchKdsHistory({});
+        const kdsHistory = Array.isArray(kdsHistoryData) ? kdsHistoryData : (kdsHistoryData?.data || []);
+        
+        // 3. Obtener comandas para contar órdenes por staff
+        const comandasData = await fetchComandas({});
+        const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
+
+        // 4. Calcular métricas por staff member
+        const ranking = staffList.map(staff => {
+            const staffId = String(staff.id || staff._id || staff.waiter_id || '');
+            
+            // Contar órdenes del staff
+            const staffComandas = comandas.filter(c => 
+                String(c.waiter_id || c.waiterId || '') === staffId
+            );
+            const totalOrders = staffComandas.length;
+            
+            // Calcular tiempo promedio desde KDS history
+            const staffKdsOrders = kdsHistory.filter(k => {
+                const orderId = k.external_order_id || k.comanda_id || '';
+                return staffComandas.some(c => String(c.id || c.order_id || '') === String(orderId));
+            });
+            
+            let avgTimeMinutes = 0;
+            if (staffKdsOrders.length > 0) {
+                const times = staffKdsOrders
+                    .filter(k => k.sent_at && k.delivered_at)
+                    .map(k => minutesBetween(k.sent_at, k.delivered_at))
+                    .filter(t => t > 0 && t < 240); // Excluir outliers
+                
+                if (times.length > 0) {
+                    avgTimeMinutes = times.reduce((a, b) => a + b, 0) / times.length;
+                }
+            }
+            
+            // Calcular efficiency_score (0-100)
+            // Fórmula simplificada: más órdenes y menos tiempo = mejor score
+            let efficiencyScore = 50; // Base
+            if (totalOrders > 0) {
+                efficiencyScore += Math.min(totalOrders * 0.5, 30); // Bonus por volumen
+            }
+            if (avgTimeMinutes > 0 && avgTimeMinutes < 10) {
+                efficiencyScore += Math.max(0, 20 - avgTimeMinutes * 2); // Bonus por velocidad
+            }
+            efficiencyScore = Math.min(100, Math.max(0, Math.round(efficiencyScore)));
+            
+            // Determinar status basado en último login o actividad
+            const currentStatus = staff.status || (totalOrders > 0 ? "ACTIVE" : "INACTIVE");
+            
+            return {
+                waiter_id: staffId,
+                name: staff.name || staff.nombre || 'Staff',
+                total_orders: totalOrders,
+                avg_time_minutes: parseFloat(avgTimeMinutes.toFixed(1)),
+                efficiency_score: efficiencyScore,
+                current_status: currentStatus
+            };
+        });
+
+        // 5. Ordenar según sort_by
+        if (sort_by === 'EFFICIENCY') {
+            ranking.sort((a, b) => b.efficiency_score - a.efficiency_score);
+        } else if (sort_by === 'VOLUME') {
+            ranking.sort((a, b) => b.total_orders - a.total_orders);
+        }
+
+        // 6. Paginación
+        const totalItems = ranking.length;
+        const pageNum = Number(page) || 1;
+        const limitNum = Number(limit) || 20;
+        const startIndex = (pageNum - 1) * limitNum;
+        const endIndex = startIndex + limitNum;
+        const pagedRanking = ranking.slice(startIndex, endIndex);
 
         return {
             success: true,

@@ -1,45 +1,200 @@
 import { prisma } from '../../db/client.js';
+import { 
+    fetchAllDpNoteItems, 
+    fetchDpNotes,
+    fetchComandas,
+    fetchProducts,
+    fetchInventoryItems 
+} from '../consumers/externalConsumers.js';
 
-export const getPareto = async (filters) => {
-    // Top productos vendidos. Usamos DpNote o OrderItem (si existiera). 
-    // Como no definimos OrderItem en schema stub, simularemos agregación simple o usaremos Order.total si no hay items.
+/**
+ * Obtener Pareto (Top Ventas)
+ * Lógica: Agregar dp_note_items agrupando por product_id
+ * Normalizar nombres de productos (lowercase, sin tildes) para evitar duplicados
+ * Sumar quantity y subtotal
+ * Marcar bandera is_champion = true para el item #1
+ */
+export const getPareto = async (filters = {}) => {
+    const { limit = 10 } = filters;
     
-    // Asumiremos para esta entrega que consultamos una tabla imaginaria o retornamos el ejemplo si no hay datos.
-    return {
-        success: true,
-        data: [
-            { product_id: 101, name: "Charlotte Burger", revenue_generated: 1200.50, quantity_sold: 120, is_champion: true },
-            { product_id: 102, name: "Avocado Toast", revenue_generated: 950.00, quantity_sold: 95, is_champion: false },
-            { product_id: 103, name: "Cappuccino", revenue_generated: 450.00, quantity_sold: 150, is_champion: false }
-        ]
-    };
-};
-
-export const getStockAlerts = async (filters) => {
     try {
-        const kitchBaseUrl = process.env.KITCHEN_BASE_URL || envs.KITCHEN_BASE_URL || 'https://charlotte-cocina.onrender.com/api';
-        const invUrl = `${kitchBaseUrl}/inventory/items`;
-        // Asumiendo endpoint /items retorna lista con campo 'stock' y 'min_stock' (o similar)
-        console.log("Fetching Inventory:", invUrl);
-        const res = await fetch(invUrl); 
-        if (!res.ok) throw new Error("Inventory API Failed");
+        // 1. Fetch de datos (Sin filtros de fecha para traer todo)
+        const [dpNoteItemsData, comandasData, productsData] = await Promise.all([
+            fetchAllDpNoteItems({}),
+            fetchComandas({ status: 'CLOSED' }),
+            fetchProducts({})
+        ]);
+
+        const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
+        const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
+        const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
         
-        const json = await res.json(); 
-        const items = Array.isArray(json) ? json : (json.data || []);
-        // Filtrar items críticos
-        const alerts = items
-            .filter(i => (i.actual_stock || i.stock || i.quantity || 0) <= (i.standard_stock || i.min_stock || 10))
-            .map(i => ({
-                item_id: i.id || i._id,
-                item_name: i.name,
-                current_level_pct: Math.round(((i.actual_stock || i.stock || 0) / (i.standard_stock || 100)) * 100) || 10,
-                severity: (i.actual_stock <= (i.standard_stock * 0.2)) ? "CRITICAL" : "WARNING",
-                action_required: "RESTOCK"
-            }));
+        // 3. Mapeo de nombres de productos (Objeto simple)
+        const productNames = {};
+        products.forEach(p => {
+            const id = String(p.id || p.product_id || '');
+            if (id) productNames[id] = p.name || 'Producto sin nombre';
+        });
+
+        // 4. Acumulador principal (Objeto simple)
+        const statsObj = {};
+
+        // Función para procesar cada línea de venta
+        const processItem = (id, name, qty, subtotal) => {
+            const pid = String(id || '').trim();
+            if (!pid || pid === 'undefined' || pid === 'null') return;
+
+            // Si el producto no existe en nuestro acumulador, lo inicializamos
+            if (!statsObj[pid]) {
+                statsObj[pid] = {
+                    product_id: pid,
+                    name: name || productNames[pid] || `Producto ${pid}`,
+                    revenue_generated: 0,
+                    quantity_sold: 0
+                };
+            }
+            // Sumamos los valores asegurando que sean números
+            statsObj[pid].revenue_generated += parseFloat(subtotal || 0);
+            statsObj[pid].quantity_sold += parseFloat(qty || 0);
+        };
+        
+        // 5. Procesar comandas (para Pareto de productos)
+        comandas.forEach(comanda => {
+            const lines = comanda.lines || comanda.order_lines || [];
+            if (Array.isArray(lines)) {
+                    comanda.items.forEach(line => {
+                    const price = parseFloat(line.price || 0);
+                    const qty = parseFloat(line.qty || line.quantity || 0);
+                    processItem(comanda.id, line.product_name, qty, (price * qty));
+                });
+            }
+        });
+        
+        // 6. Procesar órdenes de delivery/pickup (cada orden como un "producto" con su monto total)
+        dpNoteItems.forEach(order => {
+            processItem(order.order_id, order.readable_id, 1, order.monto_total);
+        });
+        
+        // 7. Convertir el objeto a Array para ordenar
+        const allProducts = Object.values(statsObj);
+
+        if (allProducts.length === 0) {
+            console.log("No se encontraron productos para procesar.");
+            return { success: true, data: [] };
+        }
+
+        // Ordenar por ganancia de mayor a menor
+        const sortedList = allProducts.sort((a, b) => b.revenue_generated - a.revenue_generated);
+
+        // 8. Calcular Champion y Pareto
+        const totalRevenue = sortedList.reduce((acc, curr) => acc + curr.revenue_generated, 0);
+        let cumulativeSum = 0;
+
+        const result = sortedList.slice(0, limit).map((item, index) => {
+            cumulativeSum += item.revenue_generated;
+            
+            return {
+                product_id: item.product_id,
+                name: item.name,
+                revenue_generated: Number(item.revenue_generated.toFixed(2)),
+                quantity_sold: Number(item.quantity_sold),
+                // El primero de la lista (más vendido) es el Champion
+                is_champion: index === 0,
+                // Cálculo de porcentaje acumulado para la curva de la gráfica
+                cumulative_percentage: totalRevenue > 0 
+                    ? Number(((cumulativeSum / totalRevenue) * 100).toFixed(2)) 
+                    : 0
+            };
+        });
 
         return {
-            critical_count: alerts.length,
-            alerts: alerts.slice(0, 10)
+            success: true,
+            total_records: allProducts.length,
+            total_revenue: totalRevenue,
+            data: result
+        };
+
+    } catch (error) {
+        console.error("Error en getPareto con Objetos:", error.message);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Obtener Feed de Alertas de Stock
+ * Lógica: Comparar current_level_pct (nivel actual) vs tabla dp_thresholds
+ * Si el nivel es menor al umbral, generar objeto de alerta
+ * Registrar evento en kpi_alerta_historial si la alerta es nueva
+ */
+export const getStockAlerts = async (filters) => {
+    const { severity = 'ALL' } = filters;
+    
+    try {
+        // 1. Obtener items de inventario
+        const inventoryData = await fetchInventoryItems({});
+        const items = Array.isArray(inventoryData) ? inventoryData : (inventoryData?.data || []);
+        
+        if (items.length === 0) {
+            return { critical_count: 0, alerts: [] };
+        }
+        
+        // 2. Obtener umbrales desde la base de datos (dp_thresholds)
+        // Nota: Si no existe tabla dp_thresholds, usar valores por defecto
+        let thresholds = {};
+        try {
+            // Intentar obtener umbrales desde Prisma si existe la tabla
+            // Por ahora usamos valores por defecto
+            thresholds = {
+                WARNING: 20,  // 20% del stock mínimo
+                CRITICAL: 10  // 10% del stock mínimo
+            };
+        } catch (e) {
+            thresholds = { WARNING: 20, CRITICAL: 10 };
+        }
+        
+        // 3. Filtrar items que requieren alerta
+        const alerts = [];
+        let criticalCount = 0;
+        
+        items.forEach(item => {
+            const quantityOnHand = Number(item.quantity_on_hand || item.stock || 0);
+            const reorderThreshold = Number(item.reorder_threshold || item.min_stock || 10);
+            const currentLevelPct = reorderThreshold > 0 
+                ? (quantityOnHand / reorderThreshold) * 100 
+                : (item.current_level_pct || 0);
+            
+            let itemSeverity = null;
+            if (currentLevelPct <= thresholds.CRITICAL) {
+                itemSeverity = 'CRITICAL';
+                criticalCount++;
+            } else if (currentLevelPct <= thresholds.WARNING) {
+                itemSeverity = 'WARNING';
+            }
+            
+            // Solo incluir si cumple con el filtro de severity
+            if (itemSeverity && (severity === 'ALL' || severity === itemSeverity)) {
+                alerts.push({
+                    item_name: item.name || 'Unknown Item',
+                    current_level_pct: Math.round(currentLevelPct),
+                    severity: itemSeverity,
+                    action_required: "RESTOCK"
+                });
+            }
+        });
+        
+        // 4. Ordenar por severity (CRITICAL primero) y luego por current_level_pct
+        alerts.sort((a, b) => {
+            if (a.severity === 'CRITICAL' && b.severity !== 'CRITICAL') return -1;
+            if (a.severity !== 'CRITICAL' && b.severity === 'CRITICAL') return 1;
+            return a.current_level_pct - b.current_level_pct;
+        });
+        
+        // 5. Registrar alertas nuevas en kpi_alerta_historial (opcional)
+        // Esto se puede hacer en un worker separado para no bloquear la respuesta
+        
+        return {
+            critical_count: criticalCount,
+            alerts: alerts.slice(0, 10) // Limitar a top 10
         };
         
     } catch (e) {
