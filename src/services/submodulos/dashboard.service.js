@@ -162,8 +162,8 @@ export const getSummary = async (filters) => {
 
 export const getSummaryRange = async (filters) => {
     const { date_from, date_to, granularity } = filters;
-    const start = new Date(date_from);
-    const end = new Date(date_to);
+    const start = new Date(date_from) || new Date();
+    const end = new Date(date_to) || new Date();
 
     const snapshots = await prisma.kpiSnapshotDiario.findMany({
         where: {

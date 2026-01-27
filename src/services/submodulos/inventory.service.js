@@ -28,7 +28,7 @@ export const getPareto = async (filters = {}) => {
         const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
-        
+        console.log(dpNoteItems)
         // 3. Mapeo de nombres de productos (Objeto simple)
         const productNames = {};
         products.forEach(p => {
@@ -40,7 +40,7 @@ export const getPareto = async (filters = {}) => {
         const statsObj = {};
 
         // Función para procesar cada línea de venta
-        const processItem = (id, name, qty, subtotal) => {
+        const processItem = (id, name, qty, subtotal, date) => {
             const pid = String(id || '').trim();
             if (!pid || pid === 'undefined' || pid === 'null') return;
 
@@ -50,29 +50,46 @@ export const getPareto = async (filters = {}) => {
                     product_id: pid,
                     name: name || productNames[pid] || `Producto ${pid}`,
                     revenue_generated: 0,
-                    quantity_sold: 0
+                    quantity_sold: 0,
+                    last_sale_iso: null,      // ISO completo para comparaciones
+                    last_sale_date: null,     // YYYY-MM-DD (salida actual)
+                    last_sale_time: null      // HH:MM:SS (nueva clave solicitada)
                 };
             }
             // Sumamos los valores asegurando que sean números
             statsObj[pid].revenue_generated += parseFloat(subtotal || 0);
             statsObj[pid].quantity_sold += parseFloat(qty || 0);
+            // Actualizar la fecha más reciente (usa ISO para comparar y guardar fecha/hora por separado)
+            if (date) {
+                const saleDate = new Date(date);
+                const iso = saleDate.toISOString();
+                if (!statsObj[pid].last_sale_iso || iso > statsObj[pid].last_sale_iso) {
+                    statsObj[pid].last_sale_iso = iso;
+                    const [d, t] = iso.split('T');
+                    const time = t.split('.')[0]; // HH:MM:SS
+                    statsObj[pid].last_sale_date = d; 
+                    statsObj[pid].last_sale_time = time;
+                }
+            }
         };
         
         // 5. Procesar comandas (para Pareto de productos)
         comandas.forEach(comanda => {
             const lines = comanda.lines || comanda.order_lines || [];
+            const comandaDate = comanda.delivered_at || null; // Usar delivered_at como fecha
             if (Array.isArray(lines)) {
-                    comanda.items.forEach(line => {
+                comanda.items.forEach(line => {
                     const price = parseFloat(line.price || 0);
                     const qty = parseFloat(line.qty || line.quantity || 0);
-                    processItem(comanda.id, line.product_name, qty, (price * qty));
+                    processItem(comanda.id, line.product_name, qty, (price * qty), comandaDate);
                 });
             }
         });
-        
+
         // 6. Procesar órdenes de delivery/pickup (cada orden como un "producto" con su monto total)
         dpNoteItems.forEach(order => {
-            processItem(order.order_id, order.readable_id, 1, order.monto_total);
+            const orderDate = order.timestamp_creation || order.date || null; // Mantener como estaba para dpNoteItems
+            processItem(order.order_id, order.readable_id, 1, order.monto_total, orderDate);
         });
         
         // 7. Convertir el objeto a Array para ordenar
@@ -98,6 +115,8 @@ export const getPareto = async (filters = {}) => {
                 name: item.name,
                 revenue_generated: Number(item.revenue_generated.toFixed(2)),
                 quantity_sold: Number(item.quantity_sold),
+                last_sale_date: item.last_sale_date,
+                last_sale_time: item.last_sale_time, // <-- nueva clave con la hora (HH:MM:SS)
                 // El primero de la lista (más vendido) es el Champion
                 is_champion: index === 0,
                 // Cálculo de porcentaje acumulado para la curva de la gráfica
