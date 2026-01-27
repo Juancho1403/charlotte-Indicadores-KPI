@@ -17,7 +17,7 @@ import swaggerSpec from './config/swagger.js';
 const app = express();
 
 const corsOptions = {
-  origin: 'http://localhost:5173', // Permitir todas las fuentes (ajustar según sea necesario)
+  origin: 'https://interfaces-control.vercel.app', // Permitir todas las fuentes (ajustar según sea necesario)
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   preflightContinue: false,
   optionsSuccessStatus: 204,
