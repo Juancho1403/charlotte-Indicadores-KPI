@@ -1,12 +1,18 @@
-import fetch from 'node-fetch';
 import { prisma } from '../../db/client.js';
-import { envs } from '../../config/envs.js';
-import { minutesBetween, isSameUtcDate } from "../../utils/timeHelpers.js"
+import { minutesBetween, isSameUtcDate } from "../../utils/timeHelpers.js";
+import { 
+    fetchStaff, 
+    fetchKdsHistory, 
+    fetchComandas 
+} from '../consumers/externalConsumers.js';
 
-const COMANDAS_API_URL = process.env.COMANDAS_API_URL || 'http://localhost:3000/comandas';
-
+/**
+ * Obtener Ranking de Personal
+ * Lógica: Realizar JOIN entre KitchenStaff/Users y tablas de comandas/dp_logs
+ * Calcular efficiency_score basado en: cantidad de órdenes vs tiempo promedio vs errores
+ */
 export const getStaffRanking = async (filters) => {
-    const { sort_by = 'EFFICIENCY', limit = 20, page = 1 } = filters;
+    const { sort_by = 'EFFICIENCY', limit = 20, page = 1, shift } = filters;
 
     try {
         const kitchBaseUrl = process.env.KITCHEN_BASE_URL || envs.KITCHEN_BASE_URL || 'https://charlotte-cocina.onrender.com/api';
@@ -33,51 +39,55 @@ export const getStaffRanking = async (filters) => {
 
         return {
             success: true,
-            data: ranking.slice(0, Number(limit)),
-            meta: { total_items: ranking.length }
+            data: pagedRanking,
+            meta: { 
+                total_items: totalItems, 
+                current_page: pageNum, 
+                per_page: limitNum 
+            }
         };
 
     } catch (e) {
-        console.warn("KDS Staff Error:", e.message);
-        return { success: false, data: [] };
+        console.warn("Error en getStaffRanking:", e.message);
+        return { 
+            success: false, 
+            data: [],
+            meta: { total_items: 0, current_page: Number(page), per_page: Number(limit) }
+        };
     }
 };
 
 /**
- * getSlaBreakdown
+ * getSlaBreakdown - Obtener Desglose SLA (Semáforo)
+ * Lógica: Filtrar comandas con deliveredAt no nulo
+ * Calcular delta: deliveredAt - sentAt
+ * Clasificar en buckets: Verde (< 5 min), Amarillo (5-10 min), Rojo (> 10 min)
  * @param {Object} query - object with optional `date` string (ISO or YYYY-MM-DD)
  * @returns {Promise<Object>} - { green_zone_percent, yellow_zone_percent, red_zone_percent, data_timestamp }
  */
 export async function getSlaBreakdown(query = {}) {
   try {
-    const url = new URL(COMANDAS_API_URL);
-    // If the comandas endpoint supports a date query param, you can pass it.
-    // We still perform filtering locally to be robust.
-    if (query.date) url.searchParams.set('date', query.date);
+    const targetDate = query.date || new Date().toISOString().slice(0, 10);
 
-    const resp = await fetch(url.toString(), { method: 'GET' });
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch comandas: ${resp.status} ${resp.statusText}`);
-    }
-    const payload = await resp.json();
+    // Obtener historial de KDS que contiene comandas con estados READY/DELIVERED
+    const kdsHistoryData = await fetchKdsHistory({ date: targetDate });
+    const kdsHistory = Array.isArray(kdsHistoryData) ? kdsHistoryData : (kdsHistoryData?.data || []);
+    
+    // Filtrar: solo comandas entregadas (delivered_at !== null)
+    const delivered = kdsHistory.filter(c => c.delivered_at || c.finishedAt);
 
-    // Expect payload.data to be an array
-    const comandas = Array.isArray(payload?.data) ? payload.data : [];
-
-    // Filter: only delivered comandas (delivered_at !== null)
-    const delivered = comandas.filter(c => c.delivered_at);
-
-    // Further filter by requested date (based on delivered_at)
-    const targetDate = query.date; 
+    // Filtrar por fecha solicitada (basado en delivered_at)
     const deliveredOnDate = delivered.filter(c => {
       try {
-        return isSameUtcDate(c.delivered_at, targetDate);
+        const deliveredDate = c.delivered_at || c.finishedAt;
+        if (!deliveredDate) return false;
+        return isSameUtcDate(deliveredDate, targetDate);
       } catch (e) {
         return false;
       }
     });
 
-    // If there are no delivered comandas for that date, return zeros with timestamp
+    // Si no hay comandas entregadas para esa fecha, retornar ceros
     if (deliveredOnDate.length === 0) {
       return {
         green_zone_percent: 0,
@@ -87,19 +97,26 @@ export async function getSlaBreakdown(query = {}) {
       };
     }
 
-    // Compute service_time_minutes for each and classify
+    // Calcular tiempo de servicio para cada comanda y clasificar
     let green = 0, yellow = 0, red = 0;
     for (const c of deliveredOnDate) {
       let serviceMinutes = undefined;
+      
+      // Intentar obtener tiempo de servicio de diferentes campos
       if (c.metrics && typeof c.metrics.service_time_minutes === 'number') {
         serviceMinutes = c.metrics.service_time_minutes;
       } else if (c.sent_at && c.delivered_at) {
         serviceMinutes = minutesBetween(c.sent_at, c.delivered_at);
-      } else {
-        // If cannot compute, skip this record
-        continue;
-      }
+      } else if (c.sent_at && c.deliveredAt) {
+        serviceMinutes = minutesBetween(c.sent_at, c.deliveredAt);
+      } else if (c.created_at && c.delivered_at) {
+        serviceMinutes = minutesBetween(c.created_at, c.delivered_at);
+      } 
 
+      // Clasificar en buckets según documentación:
+      // Verde: < 5 min
+      // Amarillo: 5 - 10 min
+      // Rojo: > 10 min
       if (serviceMinutes < 5) {
         green += 1;
       } else if (serviceMinutes <= 10) {
@@ -110,7 +127,7 @@ export async function getSlaBreakdown(query = {}) {
     }
 
     const total = green + yellow + red;
-    // Avoid division by zero
+    // Evitar división por cero
     if (total === 0) {
       return {
         green_zone_percent: 0,
@@ -124,11 +141,11 @@ export async function getSlaBreakdown(query = {}) {
     const yellowPct = Math.round((yellow / total) * 100);
     const redPct = Math.round((red / total) * 100);
 
-    // Adjust rounding so sum is 100 (distribute rounding error to largest group)
+    // Ajustar redondeo para que la suma sea 100 (distribuir error de redondeo al grupo más grande)
     let sum = greenPct + yellowPct + redPct;
     if (sum !== 100) {
       const dif = 100 - sum;
-      // find max group
+      // Encontrar el grupo más grande
       const maxVal = Math.max(greenPct, yellowPct, redPct);
       if (greenPct === maxVal) {
         return {
@@ -161,7 +178,7 @@ export async function getSlaBreakdown(query = {}) {
       data_timestamp: new Date().toISOString(),
     };
   } catch (error) {
-    console.error("Error en SlaBreakdown (Usando Mock):", error.message);
+    console.error("Error en getSlaBreakdown:", error.message);
     // Fallback Mock Data
     return {
         green_zone_percent: 75,

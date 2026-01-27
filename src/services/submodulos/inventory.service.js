@@ -1,5 +1,3 @@
-import fetch from 'node-fetch';
-import { envs } from '../../config/envs.js';
 import { prisma } from '../../db/client.js';
 
 export const getPareto = async (filters) => {
@@ -43,8 +41,9 @@ export const getStockAlerts = async (filters) => {
             critical_count: alerts.length,
             alerts: alerts.slice(0, 10)
         };
+        
     } catch (e) {
-        console.warn("Stock Alert Fetch Error:", e.message);
+        console.warn("Error en getStockAlerts:", e.message);
         return { critical_count: 0, alerts: [] };
     }
 };

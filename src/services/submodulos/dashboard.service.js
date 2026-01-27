@@ -1,7 +1,11 @@
-import fetch from 'node-fetch'; // Asegurar fetch
 import { prisma } from '../../db/client.js';
-import { envs } from '../../config/envs.js';
-import { isSameUtcDate } from "../../utils/timeHelpers.js";
+import { isSameUtcDate, minutesBetween } from "../../utils/timeHelpers.js";
+import { 
+    fetchComandas, 
+    fetchDpNotes, 
+    fetchClienteTemporal,
+    fetchMesas 
+} from '../consumers/externalConsumers.js';
 
 export const getSummary = async (filters) => {
     const { date, force_refresh, store_id } = filters;
@@ -29,7 +33,7 @@ export const getSummary = async (filters) => {
         }
     } catch (e) { console.warn("Error Sala API:", e.message); }
 
-    // 2. Fetch Delivery
+    // 2. Fetch dp_notes de Delivery/Pickup (excluyendo CANCELLED)
     try {
         const deliveryBaseUrl = process.env.DELIVERY_BASE_URL || envs.DELIVERY_BASE_URL || 'https://delivery-pickup.onrender.com/api/dp/v1';
         const delUrl = `${deliveryBaseUrl}/orders?date=${targetDateStr}`;
@@ -47,13 +51,24 @@ export const getSummary = async (filters) => {
         }
     } catch (e) { console.warn("Error Delivery API:", e.message); }
 
-    // 3. Meta y Proyección
+    // 5. Meta y Proyección Trimestral
     const meta = await prisma.kpiMeta.findFirst({
         where: { activa: true, fechaInicio: { lte: targetDate }, fechaFin: { gte: targetDate } }
     });
     const target = Number(meta?.montoObjetivo || 450000);
-    const acumulado = totalRevenue * 1 // Solo hoy por ahora
+    // Para quarterly goal, necesitaríamos acumular desde inicio del trimestre
+    // Por ahora usamos solo el día actual como placeholder
+    const acumulado = totalRevenue;
     const progressPct = target > 0 ? (acumulado / target) * 100 : 0;
+
+    // 6. Determinar UI Status basado en umbrales (dp_thresholds)
+    // Por ahora usamos valores por defecto
+    const timeStatus = avgServiceTimeMinutes <= 5 ? "OPTIMAL" : 
+                      avgServiceTimeMinutes <= 10 ? "WARNING" : "CRITICAL";
+    const rotationStatus = tableRotation >= 1.0 ? "OPTIMAL" : 
+                          tableRotation >= 0.5 ? "WARNING" : "CRITICAL";
+    const goalStatus = progressPct >= 80 ? "ON_TRACK" : 
+                       progressPct >= 50 ? "AT_RISK" : "OFF_TRACK";
 
     return {
         success: true,
@@ -62,20 +77,20 @@ export const getSummary = async (filters) => {
             revenue: {
                 total: totalRevenue,
                 currency: "USD",
-                trend_percentage: 0,
+                trend_percentage: 0, // TODO: Calcular comparando con día anterior
                 trend_direction: "flat"
             },
             quarterly_goal: {
                 target,
                 current: acumulado,
                 progress_percentage: parseFloat(progressPct.toFixed(1)),
-                ui_status: progressPct > 80 ? "ON_TRACK" : "OFF_TRACK"
+                ui_status: goalStatus
             },
             operations: {
-                avg_service_time: "15 min", // Placeholder hasta conectar KDS History
-                time_status: "WARNING",
-                table_rotation: 1.2,
-                rotation_status: "OPTIMAL"
+                avg_service_time: avgServiceTimeFormatted,
+                time_status: timeStatus,
+                table_rotation: parseFloat(tableRotation.toFixed(2)),
+                rotation_status: rotationStatus
             }
         }
     };
