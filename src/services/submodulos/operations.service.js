@@ -5,6 +5,7 @@ import {
     fetchKdsHistory, 
     fetchComandas 
 } from '../consumers/externalConsumers.js';
+import { getAxiosAuthConfig } from './security_auth.service.js';
 
 /**
  * Obtener Ranking de Personal
@@ -17,7 +18,8 @@ export const getStaffRanking = async (filters) => {
     try {
         // 1. Obtener lista de staff del módulo Cocina
         const staffParams = shift ? { shift } : {};
-        const staffData = await fetchStaff(staffParams);
+        const axiosAuthConfig = await getAxiosAuthConfig(filters?.authorization);
+        const staffData = await fetchStaff(staffParams, axiosAuthConfig);
         const staffList = Array.isArray(staffData) ? staffData : (staffData?.data || []);
         
         if (staffList.length === 0) {

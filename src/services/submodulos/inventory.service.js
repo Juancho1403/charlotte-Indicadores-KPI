@@ -28,15 +28,15 @@ export const getPareto = async (filters = {}) => {
         const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
-
-        // 2. Mapeo de nombres de productos (Objeto simple)
+        
+        // 3. Mapeo de nombres de productos (Objeto simple)
         const productNames = {};
         products.forEach(p => {
             const id = String(p.id || p.product_id || '');
             if (id) productNames[id] = p.name || 'Producto sin nombre';
         });
 
-        // 3. Acumulador principal (Objeto simple)
+        // 4. Acumulador principal (Objeto simple)
         const statsObj = {};
 
         // Función para procesar cada línea de venta
@@ -53,25 +53,16 @@ export const getPareto = async (filters = {}) => {
                     quantity_sold: 0
                 };
             }
-            else{
-                // Sumamos los valores asegurando que sean números
-                statsObj[pid].revenue_generated += parseFloat(subtotal || 0);
-                statsObj[pid].quantity_sold += parseFloat(qty || 0);
-            }
+            // Sumamos los valores asegurando que sean números
+            statsObj[pid].revenue_generated += parseFloat(subtotal || 0);
+            statsObj[pid].quantity_sold += parseFloat(qty || 0);
         };
-        console.log(productNames)
         
-        // 4. Procesar dp_notes
-        dpNoteItems.forEach(item => {
-            const total = item.subtotal || item.price || 0;
-            processItem(item.product_id, item.name, item.quantity, total);
-        });
-        
-        // 5. Procesar comandas
+        // 5. Procesar comandas (para Pareto de productos)
         comandas.forEach(comanda => {
             const lines = comanda.lines || comanda.order_lines || [];
             if (Array.isArray(lines)) {
-                comanda.items.forEach(line => {
+                    comanda.items.forEach(line => {
                     const price = parseFloat(line.price || 0);
                     const qty = parseFloat(line.qty || line.quantity || 0);
                     processItem(comanda.id, line.product_name, qty, (price * qty));
@@ -79,7 +70,12 @@ export const getPareto = async (filters = {}) => {
             }
         });
         
-        // 6. Convertir el objeto a Array para ordenar
+        // 6. Procesar órdenes de delivery/pickup (cada orden como un "producto" con su monto total)
+        dpNoteItems.forEach(order => {
+            processItem(order.order_id, order.readable_id, 1, order.monto_total);
+        });
+        
+        // 7. Convertir el objeto a Array para ordenar
         const allProducts = Object.values(statsObj);
 
         if (allProducts.length === 0) {
@@ -90,7 +86,7 @@ export const getPareto = async (filters = {}) => {
         // Ordenar por ganancia de mayor a menor
         const sortedList = allProducts.sort((a, b) => b.revenue_generated - a.revenue_generated);
 
-        // 7. Calcular Champion y Pareto
+        // 8. Calcular Champion y Pareto
         const totalRevenue = sortedList.reduce((acc, curr) => acc + curr.revenue_generated, 0);
         let cumulativeSum = 0;
 
