@@ -14,122 +14,113 @@ import {
  * Sumar quantity y subtotal
  * Marcar bandera is_champion = true para el item #1
  */
-export const getPareto = async (filters) => {
-    const { limit = 5, date_from, date_to } = filters;
+export const getPareto = async (filters = {}) => {
+    const { limit = 10 } = filters;
     
     try {
-        // 1. Obtener todos los items de dp_notes en el rango de fechas
-        const params = {};
-        if (date_from) params.date_from = date_from;
-        if (date_to) params.date_to = date_to;
-        
-        const dpNoteItemsData = await fetchAllDpNoteItems(params);
+        // 1. Fetch de datos (Sin filtros de fecha para traer todo)
+        const [dpNoteItemsData, comandasData, productsData] = await Promise.all([
+            fetchAllDpNoteItems({}),
+            fetchComandas({ status: 'CLOSED' }),
+            fetchProducts({})
+        ]);
+
         const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
-        
-        // 2. Obtener comandas cerradas del módulo ATC para incluir ventas de sala
-        const comandasData = await fetchComandas({ 
-            ...params, 
-            status: 'CLOSED' 
-        });
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
-        
-        // 3. Obtener productos para mapear IDs a nombres
-        const productsData = await fetchProducts({});
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
-        const productMap = new Map();
+
+        // 2. Mapeo de nombres de productos (Objeto simple)
+        const productNames = {};
         products.forEach(p => {
             const id = String(p.id || p.product_id || '');
-            productMap.set(id, p.name || 'Unknown Product');
+            if (id) productNames[id] = p.name || 'Producto sin nombre';
         });
-        
-        // 4. Agregar items de dp_notes por product_id
-        const productStats = new Map();
-        
-        dpNoteItems.forEach(item => {
-            const productId = String(item.product_id || '');
-            if (!productId) return;
-            
-            const normalizedId = productId.toLowerCase().trim();
-            const quantity = Number(item.quantity || 0);
-            const subtotal = Number(item.subtotal || item.price || 0);
-            
-            if (!productStats.has(normalizedId)) {
-                productStats.set(normalizedId, {
-                    product_id: productId,
-                    name: item.name || productMap.get(productId) || `Product ${productId}`,
+
+        // 3. Acumulador principal (Objeto simple)
+        const statsObj = {};
+
+        // Función para procesar cada línea de venta
+        const processItem = (id, name, qty, subtotal) => {
+            const pid = String(id || '').trim();
+            if (!pid || pid === 'undefined' || pid === 'null') return;
+
+            // Si el producto no existe en nuestro acumulador, lo inicializamos
+            if (!statsObj[pid]) {
+                statsObj[pid] = {
+                    product_id: pid,
+                    name: name || productNames[pid] || `Producto ${pid}`,
                     revenue_generated: 0,
                     quantity_sold: 0
+                };
+            }
+            else{
+                // Sumamos los valores asegurando que sean números
+                statsObj[pid].revenue_generated += parseFloat(subtotal || 0);
+                statsObj[pid].quantity_sold += parseFloat(qty || 0);
+            }
+        };
+        console.log(productNames)
+        
+        // 4. Procesar dp_notes
+        dpNoteItems.forEach(item => {
+            const total = item.subtotal || item.price || 0;
+            processItem(item.product_id, item.name, item.quantity, total);
+        });
+        
+        // 5. Procesar comandas
+        comandas.forEach(comanda => {
+            const lines = comanda.lines || comanda.order_lines || [];
+            if (Array.isArray(lines)) {
+                comanda.items.forEach(line => {
+                    const price = parseFloat(line.price || 0);
+                    const qty = parseFloat(line.qty || line.quantity || 0);
+                    processItem(comanda.id, line.product_name, qty, (price * qty));
                 });
             }
-            
-            const stats = productStats.get(normalizedId);
-            stats.revenue_generated += subtotal;
-            stats.quantity_sold += quantity;
         });
         
-        // 5. Agregar items de comandas (si tienen líneas con product_id)
-        comandas.forEach(comanda => {
-            if (!comanda.lines || !Array.isArray(comanda.lines)) return;
-            
-            comanda.lines.forEach(line => {
-                const productId = String(line.product_id || '');
-                if (!productId) return;
-                
-                const normalizedId = productId.toLowerCase().trim();
-                const quantity = Number(line.qty || line.quantity || 0);
-                const price = Number(line.price || 0);
-                const subtotal = quantity * price;
-                
-                if (!productStats.has(normalizedId)) {
-                    productStats.set(normalizedId, {
-                        product_id: productId,
-                        name: productMap.get(productId) || `Product ${productId}`,
-                        revenue_generated: 0,
-                        quantity_sold: 0
-                    });
-                }
-                
-                const stats = productStats.get(normalizedId);
-                stats.revenue_generated += subtotal;
-                stats.quantity_sold += quantity;
-            });
-        });
-        
-        // 6. Convertir a array y ordenar por revenue_generated (descendente)
-        const paretoList = Array.from(productStats.values())
-            .map(item => ({
-                product_id: Number(item.product_id) || item.product_id,
-                name: item.name,
-                revenue_generated: parseFloat(item.revenue_generated.toFixed(2)),
-                quantity_sold: item.quantity_sold
-            }))
-            .sort((a, b) => b.revenue_generated - a.revenue_generated);
-        
-        // 7. Marcar el #1 como champion y limitar resultados
-        const topProducts = paretoList.slice(0, Number(limit));
-        if (topProducts.length > 0) {
-            topProducts[0].is_champion = true;
+        // 6. Convertir el objeto a Array para ordenar
+        const allProducts = Object.values(statsObj);
+
+        if (allProducts.length === 0) {
+            console.log("No se encontraron productos para procesar.");
+            return { success: true, data: [] };
         }
-        topProducts.forEach((item, index) => {
-            if (index > 0) item.is_champion = false;
+
+        // Ordenar por ganancia de mayor a menor
+        const sortedList = allProducts.sort((a, b) => b.revenue_generated - a.revenue_generated);
+
+        // 7. Calcular Champion y Pareto
+        const totalRevenue = sortedList.reduce((acc, curr) => acc + curr.revenue_generated, 0);
+        let cumulativeSum = 0;
+
+        const result = sortedList.slice(0, limit).map((item, index) => {
+            cumulativeSum += item.revenue_generated;
+            
+            return {
+                product_id: item.product_id,
+                name: item.name,
+                revenue_generated: Number(item.revenue_generated.toFixed(2)),
+                quantity_sold: Number(item.quantity_sold),
+                // El primero de la lista (más vendido) es el Champion
+                is_champion: index === 0,
+                // Cálculo de porcentaje acumulado para la curva de la gráfica
+                cumulative_percentage: totalRevenue > 0 
+                    ? Number(((cumulativeSum / totalRevenue) * 100).toFixed(2)) 
+                    : 0
+            };
         });
-        
+
         return {
             success: true,
-            data: topProducts
+            total_records: allProducts.length,
+            total_revenue: totalRevenue,
+            data: result
         };
-        
+
     } catch (error) {
-        console.warn("Error en getPareto:", error.message);
-        // Fallback a datos de ejemplo
-        return {
-            success: true,
-            data: [
-                { product_id: 101, name: "Charlotte Burger", revenue_generated: 1200.50, quantity_sold: 120, is_champion: true },
-                { product_id: 102, name: "Avocado Toast", revenue_generated: 950.00, quantity_sold: 95, is_champion: false },
-                { product_id: 103, name: "Cappuccino", revenue_generated: 450.00, quantity_sold: 150, is_champion: false }
-            ]
-        };
+        console.error("Error en getPareto con Objetos:", error.message);
+        return { success: false, error: error.message };
     }
 };
 

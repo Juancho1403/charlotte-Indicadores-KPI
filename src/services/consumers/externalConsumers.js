@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { envs } from '../../config/envs.js';
-
+let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 let mock;
 if (envs.USE_MOCK_SERVICES) {
   // Lazy import mock consumers
@@ -8,7 +8,10 @@ if (envs.USE_MOCK_SERVICES) {
   mock = await import('./mockConsumers.js');
 }
 
-const axiosJson = axios.create({ timeout: 8000 });
+const axiosJson = axios.create({ timeout: 8000, headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  } });
 
 // ============================================
 // MÓDULO: ATENCIÓN AL CLIENTE (ATC)
@@ -22,7 +25,7 @@ const axiosJson = axios.create({ timeout: 8000 });
 export async function fetchComandas(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchComandas(params);
   const url = `${envs.AT_CLIENT_BASE_URL}/comandas`;
-  const res = await axiosJson.get(url, { params });
+  const res = await axiosJson.get(url, params );
   return res.data;
 }
 
@@ -47,7 +50,7 @@ export async function fetchComandaById(id) {
 export async function fetchMesas(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchMesas(params);
   const url = `${envs.AT_CLIENT_BASE_URL}/tables`;
-  const res = await axiosJson.get(url, { params });
+  const res = await axiosJson.get(url, params);
   return res.data;
 }
 
@@ -72,7 +75,7 @@ export async function fetchSesiones(params = {}) {
 export async function fetchClienteTemporal(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchClienteTemporal(params);
   const url = `${envs.AT_CLIENT_BASE_URL}/clients`;
-  const res = await axiosJson.get(url, { params });
+  const res = await axiosJson.get(url, params);
   return res.data;
 }
 
@@ -211,6 +214,7 @@ export async function fetchStaff(params = {}) {
 // MÓDULO: DELIVERY/PICKUP (DP)
 // ============================================
 
+
 /**
  * Obtener órdenes de delivery/pickup
  * Endpoint: GET /api/dp/v1/orders
@@ -223,18 +227,22 @@ export async function fetchDeliveryOrders(params = {}) {
   if (params.active === true || params.active === 'true') {
     const url = `${envs.DELIVERY_BASE_URL}/orders/active`;
     const res = await axiosJson.get(url);
-    return res.data;
+    // Tomar en cuenta si la respuesta es un arreglo directo o envuelto en data
+    return Array.isArray(res.data) ? res.data : (res.data?.data || []);
   }
   // Si se solicita por status, usar endpoint específico
   if (params.status) {
     const url = `${envs.DELIVERY_BASE_URL}/orders/status/${params.status}`;
     const res = await axiosJson.get(url);
-    return res.data;
+    // Tomar en cuenta si la respuesta es un arreglo directo o envuelto en data
+    return Array.isArray(res.data) ? res.data : (res.data?.data || []);
   }
   const url = `${envs.DELIVERY_BASE_URL}/orders`;
   const res = await axiosJson.get(url, { params });
-  return res.data;
+  // Tomar en cuenta si la respuesta es un arreglo directo o envuelto en data
+  return Array.isArray(res.data) ? res.data : (res.data?.data || []);
 }
+
 
 /**
  * Obtener órdenes de delivery/pickup (equivalente a dp_notes) - usado para revenue calculation

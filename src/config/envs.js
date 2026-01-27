@@ -21,9 +21,11 @@ export const envs = {
     // Cocina (KDS): https://charlotte-cocina.onrender.com/api-docs/#/
     KDS_BASE_URL: process.env.KDS_BASE_URL || 'https://charlotte-cocina.onrender.com/api/kitchen',
     // Delivery/Pickup: https://delivery-pickup.onrender.com/docs/#/
-    DELIVERY_BASE_URL: process.env.DELIVERY_BASE_URL || 'https://delivery-pickup.onrender.com/api/dp/v1',
+    DELIVERY_BASE_URL: process.env.DELIVERY_BASE_URL || 'https://delivery.irissoftware.lat/api/dp/v1',
     // Inventario está en el módulo de Cocina
-    INVENTORY_BASE_URL: process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/api/kitchen',
+    INVENTORY_BASE_URL: process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/api/inventory',
+    SECURITY_BASE_URL: process.env.SECURITY_BASE_URL || 'https://charlotte-seguridad.onrender.com',
+    SECURITY_HAS_PERMISSION_PATH: process.env.SECURITY_BASE_URL || '/api/seguridad/auth/hasPermission',
     // Mock switch: si se establece a 'true' usará consumidores mock locales
     USE_MOCK_SERVICES: String(process.env.USE_MOCK_SERVICES || '').toLowerCase() === 'true'
 };

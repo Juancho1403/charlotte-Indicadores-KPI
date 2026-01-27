@@ -134,18 +134,18 @@ export const getStaffRanking = async (filters) => {
 export async function getSlaBreakdown(query = {}) {
   try {
     const targetDate = query.date || new Date().toISOString().slice(0, 10);
-    
+
     // Obtener historial de KDS que contiene comandas con estados READY/DELIVERED
     const kdsHistoryData = await fetchKdsHistory({ date: targetDate });
     const kdsHistory = Array.isArray(kdsHistoryData) ? kdsHistoryData : (kdsHistoryData?.data || []);
     
     // Filtrar: solo comandas entregadas (delivered_at !== null)
-    const delivered = kdsHistory.filter(c => c.delivered_at || c.deliveredAt);
-    
+    const delivered = kdsHistory.filter(c => c.delivered_at || c.finishedAt);
+
     // Filtrar por fecha solicitada (basado en delivered_at)
     const deliveredOnDate = delivered.filter(c => {
       try {
-        const deliveredDate = c.delivered_at || c.deliveredAt;
+        const deliveredDate = c.delivered_at || c.finishedAt;
         if (!deliveredDate) return false;
         return isSameUtcDate(deliveredDate, targetDate);
       } catch (e) {
@@ -177,10 +177,7 @@ export async function getSlaBreakdown(query = {}) {
         serviceMinutes = minutesBetween(c.sent_at, c.deliveredAt);
       } else if (c.created_at && c.delivered_at) {
         serviceMinutes = minutesBetween(c.created_at, c.delivered_at);
-      } else {
-        // Si no se puede calcular, saltar este registro
-        continue;
-      }
+      } 
 
       // Clasificar en buckets según documentación:
       // Verde: < 5 min

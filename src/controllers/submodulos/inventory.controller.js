@@ -33,7 +33,7 @@ export const getAlerts = async (req, res) => {
         if (!validation.success) return res.status(400).json({ errors: validation.error.format() });
 
         // Se mantiene igual 
-        const result = await inventoryService.getAlerts(validation.data.query);
+        const result = await inventoryService.getStockAlerts(validation.data.query);
         res.json(result);
     } catch (error) {
         res.status(500).json({ error: error.message });
