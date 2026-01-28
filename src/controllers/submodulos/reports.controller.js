@@ -46,7 +46,7 @@ export const getJobStatus = async (req, res) => {
         
         // Si el servicio dice "NOT_FOUND", devolvemos 404, si no, 200
         if (result.status === 'NOT_FOUND') {
-             return res.status(404).json(result);
+            return res.status(404).json(result);
         }
 
         res.json(result);

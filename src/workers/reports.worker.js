@@ -1,12 +1,13 @@
 import { Worker } from 'bullmq';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { envs } from '../config/envs.js'; // Las variables que configuramos
+import { fetchComandas, fetchDeliveryOrders } from '../services/consumers/externalConsumers.js';
 import IORedis from 'ioredis';
 import { prisma } from '../db/client.js';
 import { connectRedisIfAvailable } from '../utils/redis.util.js';
+import { te } from 'date-fns/locale';
 
 const redisOptions = {
   maxRetriesPerRequest: null,
@@ -14,16 +15,10 @@ const redisOptions = {
   retryStrategy: times => Math.min(times * 50, 2000),
 };
 
-// 1. Configurar Cliente AWS S3
-const s3Client = new S3Client({
-  region: envs.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: envs.AWS_ACCESS_KEY,
-    secretAccessKey: envs.AWS_SECRET_KEY,
-  },
-});
+// 1. Configurar Cliente AWS S3 - ELIMINADO
+// const s3Client = new S3Client({...});
 
-console.log("👷 Worker de reportes (S3 + Cleanup) module cargado (no iniciado)...");
+console.log("👷 Worker de reportes (Local FS cleanup) module cargado (no iniciado)...");
 
 // 2. Función para iniciar el Worker en tiempo de ejecución
 export async function startReportsWorker() {
@@ -48,14 +43,16 @@ export async function startReportsWorker() {
     worker = new Worker('reports-queue', async (job) => {
   const { reportId, type, content, webhookUrl } = job.data;
   const fileName = `report-${reportId}.pdf`;
-  const tempPath = path.join('/tmp', fileName); // Ruta temporal local
-
+  const tempDir = path.join(process.cwd(), 'src', 'tmp');
+  await fs.mkdir(tempDir, { recursive: true });
+  const tempPath = path.join(tempDir, fileName); // Ruta persistente local
+  console.log(`📂 Guardando reporte en: ${tempPath}`);
   console.log(`🔄 [Job ${job.id}] Procesando reporte ${type}...`);
 
   try {
     // A. Actualizar estado en DB a PROCESSING
     // Usamos 'ReportLog' porque es la tabla preparada para guardar URLs de archivos
-    await prisma.reportLog.update({
+    const response = await prisma.reportLog.update({
       where: { id: reportId },
       data: { status: 'PROCESSING' }
     });
@@ -66,19 +63,20 @@ export async function startReportsWorker() {
         const targetDateStr = content.start_date || new Date().toISOString().slice(0, 10);
         
         // Fetch Sala
-        const atClientBaseUrl = process.env.AT_CLIENT_BASE_URL || envs.AT_CLIENT_BASE_URL || 'https://charlotte-atencion-cliente.onrender.com/api/v1/atencion-cliente';
-        const resAt = await axios.get(`${atClientBaseUrl}/comandas`);
-        if (resAt.status === 200) {
-            const dataAt = Array.isArray(resAt.data) ? resAt.data : (resAt.data.data || []);
-            aggregatedData.push(...dataAt.map(c => ({ ...c, source: 'SALA' })));
+        try {
+          const resAtData = await fetchComandas();
+          const dataAt = Array.isArray(resAtData) ? resAtData : (resAtData.data || []);
+          aggregatedData.push(...dataAt.map(c => ({ ...c, source: 'SALA' })));
+        } catch (error) {
+           console.warn(`⚠️ [Job ${job.id}] Error fetching Comandas: ${error.message}`);
         }
 
         // Fetch Delivery
-        const deliveryBaseUrl = process.env.DELIVERY_BASE_URL || envs.DELIVERY_BASE_URL || 'https://delivery-pickup.onrender.com/api/dp/v1';
-        const resDel = await axios.get(`${deliveryBaseUrl}/orders?date=${targetDateStr}`);
-        if (resDel.status === 200) {
-            const dataDel = Array.isArray(resDel.data) ? resDel.data : (resDel.data.data || []);
-            aggregatedData.push(...dataDel.map(o => ({ ...o, source: 'DELIVERY' })));
+        try {
+          const dataDel = await fetchDeliveryOrders({ date: targetDateStr });
+          aggregatedData.push(...dataDel.map(o => ({ ...o, source: 'DELIVERY' })));
+        } catch (error) {
+           console.warn(`⚠️ [Job ${job.id}] Error fetching Delivery Orders: ${error.message}`);
         }
     } catch (e) {
         console.warn(`⚠️ [Job ${job.id}] Error al agregar datos externos: ${e.message}`);
@@ -90,22 +88,14 @@ export async function startReportsWorker() {
                           `-----------------------------------\n` +
                           `ID,Fuente,Total,Fecha\n` +
                           aggregatedData.map(d => `${d.id || d._id},${d.source},${d.total || d.monto_total || 0},${d.created_at || d.createdAt || ''}`).join('\n');
-
+    console.log(reportContent)
     await fs.writeFile(tempPath, reportContent);
-
-    // C. SUBIR A AWS S3
-    const fileBuffer = await fs.readFile(tempPath);
-    await s3Client.send(new PutObjectCommand({
-      Bucket: envs.AWS_BUCKET_NAME,
-      Key: `reports/${fileName}`,
-      Body: fileBuffer,
-      ContentType: 'application/pdf'
-    }));
+    // C. SUBIR A AWS S3 (ELIMINADO - Solo local)
+    // El archivo ya está en tempPath (src/tmp)
+    const publicUrl = `local:${tempPath}`;
+    console.log(`✅ Archivo disponible localmente: ${publicUrl}`);
     
-    // Construir la URL pública
-    const publicUrl = `https://${envs.AWS_BUCKET_NAME}.s3.amazonaws.com/reports/${fileName}`;
-
-    // D. Actualizar DB a COMPLETED con la URL real
+    // D. Actualizar DB a COMPLETED con la URL local
     await prisma.reportLog.update({
       where: { id: reportId },
       data: { 
@@ -139,14 +129,9 @@ export async function startReportsWorker() {
     throw error;
 
   } finally {
-    // F. LIMPIEZA LOCAL (Requisito Crítico 5.5)
-    // El "garbage collector": borra el archivo de /tmp SIEMPRE.
-    try {
-      await fs.unlink(tempPath);
-      console.log(`🧹 [Job ${job.id}] Archivo temporal eliminado.`);
-    } catch (e) {
-      // Ignoramos si el archivo no existía
-    }
+    // F. LIMPIEZA LOCAL
+    // NO borramos el archivo de src/tmp según requerimiento.
+    console.log(`✅ [Job ${job.id}] Reporte persistido en ${tempPath}`);
   }
     }, { 
       connection,      // Usa conexión creada dinámicamente
