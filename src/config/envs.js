@@ -23,7 +23,7 @@ export const envs = {
     // Delivery/Pickup: https://delivery-pickup.onrender.com/docs/#/
     DELIVERY_BASE_URL: process.env.DELIVERY_BASE_URL || 'https://delivery.irissoftware.lat/api/dp/v1',
     // Inventario está en el módulo de Cocina
-    INVENTORY_BASE_URL: process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/api/inventory',
+    INVENTORY_BASE_URL: process.env.INVENTORY_BASE_URL || 'https://charlotte-cocina.onrender.com/api/kitchen/inventory',
     SECURITY_BASE_URL: process.env.SECURITY_BASE_URL || 'https://charlotte-seguridad.onrender.com',
     SECURITY_HAS_PERMISSION_PATH: process.env.SECURITY_BASE_URL || '/api/seguridad/auth/hasPermission',
     // Mock switch: si se establece a 'true' usará consumidores mock locales

@@ -28,14 +28,14 @@ export const getPareto = async (filters = {}) => {
         const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
-        console.log(dpNoteItems)
+        console.log(products)
         // 3. Mapeo de nombres de productos (Objeto simple)
         const productNames = {};
         products.forEach(p => {
             const id = String(p.id || p.product_id || '');
             if (id) productNames[id] = p.name || 'Producto sin nombre';
         });
-
+        console.log("Product Names Map:", productNames);
         // 4. Acumulador principal (Objeto simple)
         const statsObj = {};
 
@@ -48,7 +48,7 @@ export const getPareto = async (filters = {}) => {
             if (!statsObj[pid]) {
                 statsObj[pid] = {
                     product_id: pid,
-                    name: name || productNames[pid] || `Producto ${pid}`,
+                    name: productNames[pid] || `Producto ${pid}`,
                     revenue_generated: 0,
                     quantity_sold: 0,
                     last_sale_iso: null,      // ISO completo para comparaciones
@@ -78,10 +78,12 @@ export const getPareto = async (filters = {}) => {
             const lines = comanda.lines || comanda.order_lines || [];
             const comandaDate = comanda.delivered_at || null; // Usar delivered_at como fecha
             if (Array.isArray(lines)) {
-                comanda.items.forEach(line => {
+                lines.forEach(line => {
                     const price = parseFloat(line.price || 0);
                     const qty = parseFloat(line.qty || line.quantity || 0);
-                    processItem(comanda.id, line.product_name, qty, (price * qty), comandaDate);
+                    const productId = String(line.product_id || '');
+                    const productName = productNames[productId] || `Producto ${productId}`;
+                    processItem(productId, productName, qty, (price * qty), comandaDate);
                 });
             }
         });
@@ -200,7 +202,7 @@ export const getStockAlerts = async (filters) => {
                 });
             }
         });
-        
+        console.log("Generated Alerts:", alerts);
         // 4. Ordenar por severity (CRITICAL primero) y luego por current_level_pct
         alerts.sort((a, b) => {
             if (a.severity === 'CRITICAL' && b.severity !== 'CRITICAL') return -1;

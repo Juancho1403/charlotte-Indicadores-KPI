@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { envs } from '../../config/envs.js';
-let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+import { getAxiosAuthConfig } from '../submodulos/security_auth.service.js';
 let mock;
 if (envs.USE_MOCK_SERVICES) {
   // Lazy import mock consumers
@@ -9,7 +9,7 @@ if (envs.USE_MOCK_SERVICES) {
 }
 
 const axiosJson = axios.create({ timeout: 8000, headers: {
-    'Authorization': `Bearer ${token}`,
+    'Authorization': `Bearer ${"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}`,
     'Content-Type': 'application/json'
   } });
 
@@ -350,8 +350,10 @@ export async function fetchDpPayments(params = {}) {
  */
 export async function fetchInventoryItems(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchInventoryItems(params);
-  const url = `${envs.INVENTORY_BASE_URL}/inventory/items`;
-  const res = await axiosJson.get(url, { params });
+  const authConfig = await getAxiosAuthConfig();
+  const url = `${envs.INVENTORY_BASE_URL}/items`;
+  const queryParams = { type: 'INGREDIENT', stockStatus: 'OK', ...params };
+  const res = await axios.get(url, { params: queryParams, ...authConfig });
   return res.data;
 }
 
