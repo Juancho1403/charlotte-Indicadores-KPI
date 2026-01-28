@@ -202,24 +202,21 @@ export const getStockAlerts = async (filters) => {
                 });
             }
         });
-        console.log("Generated Alerts:", alerts);
         // 4. Ordenar por severity (CRITICAL primero) y luego por current_level_pct
         alerts.sort((a, b) => {
             if (a.severity === 'CRITICAL' && b.severity !== 'CRITICAL') return -1;
             if (a.severity !== 'CRITICAL' && b.severity === 'CRITICAL') return 1;
             return a.current_level_pct - b.current_level_pct;
         });
-        
         // 5. Registrar alertas nuevas en kpi_alerta_historial (opcional)
         // Esto se puede hacer en un worker separado para no bloquear la respuesta
-        
         return {
             critical_count: criticalCount,
             alerts: alerts.slice(0, 10) // Limitar a top 10
         };
         
     } catch (e) {
-        console.warn("Error en getStockAlerts:", e.message);
+        console.warn("Error en getStockAlerts:", e);
         return { critical_count: 0, alerts: [] };
     }
 };

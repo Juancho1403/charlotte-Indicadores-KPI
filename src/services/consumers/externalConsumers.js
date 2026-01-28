@@ -294,8 +294,8 @@ export async function fetchDpNoteItems(orderId, params = {}) {
  */
 export async function fetchAllDpNoteItems(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchAllDpNoteItems(params);
-  // Obtener todas las órdenes en el rango de fechas
-  const orders = await fetchDeliveryOrders(params);
+  const url = `${envs.DELIVERY_BASE_URL}/orders`
+  const orders = await axiosJson.get(url, { params });
   const ordersArray = Array.isArray(orders) ? orders : (orders?.data || []);
 
   // Organizar en resumen por orden, enfocándose en monto total y detalles clave
@@ -351,6 +351,7 @@ export async function fetchDpPayments(params = {}) {
 export async function fetchInventoryItems(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchInventoryItems(params);
   const authConfig = await getAxiosAuthConfig();
+  console.log(authConfig)
   const url = `${envs.INVENTORY_BASE_URL}/items`;
   const queryParams = { type: 'INGREDIENT', stockStatus: 'OK', ...params };
   const res = await axios.get(url, { params: queryParams, ...authConfig });

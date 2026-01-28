@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { exportReport, getJobStatus } from '../../controllers/submodulos/reports.controller.js';
+import { exportReport, getJobStatus, downloadReport } from '../../controllers/submodulos/reports.controller.js';
 // Importamos el middleware que creaste hace poco
 import { idempotencyMiddleware } from '../../middlewares/idempotency.middleware.js';
 
@@ -51,5 +51,31 @@ router.post('/export', idempotencyMiddleware, exportReport);
  *                 download_url: { type: string, example: "https://s3.amazonaws.com/reports/kpi_2026.csv" }
  */
 router.get('/jobs/:job_id', getJobStatus);
+
+/**
+ * @swagger
+ * /api/v1/kpi/reports/download/{job_id}:
+ *   get:
+ *     summary: Descargar archivo de reporte generado
+ *     tags: [Reports]
+ *     parameters:
+ *       - in: path
+ *         name: job_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "job_abcd_1234"
+ *     responses:
+ *       200:
+ *         description: Archivo Excel descargable
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: Reporte no encontrado o no completado
+ */
+router.get('/download/:job_id', downloadReport);
 
 export default router;

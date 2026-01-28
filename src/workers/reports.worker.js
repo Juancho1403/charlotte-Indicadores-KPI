@@ -8,6 +8,11 @@ import IORedis from 'ioredis';
 import { prisma } from '../db/client.js';
 import { connectRedisIfAvailable } from '../utils/redis.util.js';
 import { te } from 'date-fns/locale';
+import ExcelJS from 'exceljs';
+import * as kpiService from '../services/kpi.service.js';
+
+// Almacenamiento simple en memoria para reportes completados
+const completedReports = new Map();
 
 const redisOptions = {
   maxRetriesPerRequest: null,
@@ -42,7 +47,7 @@ export async function startReportsWorker() {
 
     worker = new Worker('reports-queue', async (job) => {
   const { reportId, type, content, webhookUrl } = job.data;
-  const fileName = `report-${reportId}.pdf`;
+  const fileName = `report-${reportId}.xlsx`;
   const tempDir = path.join(process.cwd(), 'src', 'tmp');
   await fs.mkdir(tempDir, { recursive: true });
   const tempPath = path.join(tempDir, fileName); // Ruta persistente local
@@ -50,86 +55,135 @@ export async function startReportsWorker() {
   console.log(`🔄 [Job ${job.id}] Procesando reporte ${type}...`);
 
   try {
-    // A. Actualizar estado en DB a PROCESSING
-    // Usamos 'ReportLog' porque es la tabla preparada para guardar URLs de archivos
-    const response = await prisma.reportLog.update({
-      where: { id: reportId },
-      data: { status: 'PROCESSING' }
-    });
+    // A. No usamos base de datos, solo procesamos el reporte
+    console.log(`🔄 [Job ${job.id}] Procesando reporte ${type}...`);
 
-    // B. GENERAR DATOS (Agregación de APIs Externas)
-    let aggregatedData = [];
+    // B. GENERAR DATOS (Kitchen Queue)
+    let kitchenQueueData = [];
     try {
-        const targetDateStr = content.start_date || new Date().toISOString().slice(0, 10);
-        
-        // Fetch Sala
-        try {
-          const resAtData = await fetchComandas();
-          const dataAt = Array.isArray(resAtData) ? resAtData : (resAtData.data || []);
-          aggregatedData.push(...dataAt.map(c => ({ ...c, source: 'SALA' })));
-        } catch (error) {
-           console.warn(`⚠️ [Job ${job.id}] Error fetching Comandas: ${error.message}`);
-        }
-
-        // Fetch Delivery
-        try {
-          const dataDel = await fetchDeliveryOrders({ date: targetDateStr });
-          aggregatedData.push(...dataDel.map(o => ({ ...o, source: 'DELIVERY' })));
-        } catch (error) {
-           console.warn(`⚠️ [Job ${job.id}] Error fetching Delivery Orders: ${error.message}`);
-        }
-    } catch (e) {
-        console.warn(`⚠️ [Job ${job.id}] Error al agregar datos externos: ${e.message}`);
+        const queueResponse = await kpiService.getKitchenQueue();
+        kitchenQueueData = queueResponse.queue || [];
+        console.log(`📊 [Job ${job.id}] Obtenidos ${kitchenQueueData.length} registros de Kitchen Queue`);
+    } catch (error) {
+        console.warn(`⚠️ [Job ${job.id}] Error fetching Kitchen Queue: ${error.message}`);
     }
 
-    // C. GENERAR ARCHIVO (CSV/Text)
-    const reportContent = `Reporte de Transacciones - ${type}\n` +
-                          `Generado: ${new Date().toISOString()}\n` +
-                          `-----------------------------------\n` +
-                          `ID,Fuente,Total,Fecha\n` +
-                          aggregatedData.map(d => `${d.id || d._id},${d.source},${d.total || d.monto_total || 0},${d.created_at || d.createdAt || ''}`).join('\n');
-    console.log(reportContent)
-    await fs.writeFile(tempPath, reportContent);
-    // C. SUBIR A AWS S3 (ELIMINADO - Solo local)
+    // C. LIMPIEZA DE ARCHIVOS ANTIGUOS
+    await cleanupOldFiles(tempDir);
+
+    // D. GENERAR ARCHIVO EXCEL
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Kitchen Queue Report');
+    
+    // Agregar encabezados según especificación
+    worksheet.columns = [
+      { header: 'ID TRANSACCIÓN', key: 'id', width: 40 },
+      { header: 'FECHA', key: 'fecha', width: 15 },
+      { header: 'HORA', key: 'hora', width: 15 },
+      { header: 'CAMARERO', key: 'camarero', width: 20 },
+      { header: 'CANTIDAD', key: 'cantidad', width: 12 },
+      { header: 'DURACIÓN TOTAL', key: 'duracion', width: 20 }
+    ];
+    
+    // Agregar datos formateados
+    kitchenQueueData.forEach(item => {
+      const createdAt = new Date(item.createdAt);
+      const fecha = createdAt.toISOString().split('T')[0];
+      const hora = createdAt.toTimeString().split(' ')[0];
+      
+      // Calcular duración total
+      let duracion = 'N/A';
+      if (item.startedAt && item.finishedAt) {
+        const started = new Date(item.startedAt);
+        const finished = new Date(item.finishedAt);
+        const diffMs = finished - started;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffSecs = Math.floor((diffMs % 60000) / 1000);
+        duracion = `${diffMins}m ${diffSecs}s`;
+      } else if (item.startedAt) {
+        const started = new Date(item.startedAt);
+        const now = new Date();
+        const diffMs = now - started;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffSecs = Math.floor((diffMs % 60000) / 1000);
+        duracion = `${diffMins}m ${diffSecs}s (en progreso)`;
+      }
+      
+      worksheet.addRow({
+        id: item.id,
+        fecha: fecha,
+        hora: hora,
+        camarero: item.waiter?.name || item.customerName || 'Sin asignar',
+        cantidad: item.quantity || 1,
+        duracion: duracion
+      });
+    });
+    
+    // Agregar metadata
+    worksheet.insertRow(1, [`Reporte de Kitchen Queue - ${type}`]);
+    worksheet.insertRow(2, [`Generado: ${new Date().toISOString()}`]);
+    worksheet.insertRow(3, [`Total de registros: ${kitchenQueueData.length}`]);
+    worksheet.insertRow(4, []);
+    
+    // Guardar archivo Excel
+    await workbook.xlsx.writeFile(tempPath);
+    console.log(`✅ Archivo Excel generado: ${tempPath}`);
+    // E. SUBIR A AWS S3 (ELIMINADO - Solo local)
     // El archivo ya está en tempPath (src/tmp)
     const publicUrl = `local:${tempPath}`;
+    const downloadUrl = `/api/v1/kpi/reports/download/${reportId}`;
     console.log(`✅ Archivo disponible localmente: ${publicUrl}`);
+    console.log(`🔗 URL de descarga: ${downloadUrl}`);
     
-    // D. Actualizar DB a COMPLETED con la URL local
-    await prisma.reportLog.update({
-      where: { id: reportId },
-      data: { 
-        status: 'COMPLETED',
-        fileUrl: publicUrl
-      }
+    // F. Almacenar en memoria en lugar de base de datos
+    completedReports.set(reportId, {
+      reportId,
+      status: 'COMPLETED',
+      filePath: tempPath,
+      downloadUrl: downloadUrl,
+      createdAt: new Date().toISOString(),
+      type: type
     });
+    console.log(`💾 Reporte almacenado en memoria: ${reportId}`);
 
-    // E. Callback de Notificación (Requisito 5.5)
+    // G. Callback de Notificación (Requisito 5.5)
     if (webhookUrl) {
       try {
-        await axios.post(webhookUrl, { jobId: job.id, status: 'COMPLETED', url: publicUrl });
-        console.log(`🔔 [Job ${job.id}] Webhook enviado.`);
+        await axios.post(webhookUrl, { 
+          jobId: job.id, 
+          status: 'COMPLETED', 
+          url: publicUrl,
+          downloadUrl: downloadUrl
+        });
+        console.log(`🔔 [Job ${job.id}] Webhook enviado con URL de descarga.`);
       } catch (err) {
         console.error(`⚠️ [Job ${job.id}] Fallo al enviar webhook (No crítico).`);
       }
     }
 
     console.log(`✅ [Job ${job.id}] Terminado exitosamente: ${publicUrl}`);
-    return { status: 'ok', url: publicUrl };
+    return { 
+      status: 'ok', 
+      url: publicUrl, 
+      downloadUrl: downloadUrl,
+      reportId: reportId
+    };
 
   } catch (error) {
     console.error(`❌ [Job ${job.id}] Error crítico:`, error);
     
-    // Marcar como fallido en DB
-    await prisma.reportLog.update({
-      where: { id: reportId },
-      data: { status: 'FAILED' }
+    // Almacenar estado fallido en memoria
+    completedReports.set(reportId, {
+      reportId,
+      status: 'FAILED',
+      error: error.message,
+      createdAt: new Date().toISOString()
     });
     
     throw error;
 
   } finally {
-    // F. LIMPIEZA LOCAL
+    // H. LIMPIEZA LOCAL
     // NO borramos el archivo de src/tmp según requerimiento.
     console.log(`✅ [Job ${job.id}] Reporte persistido en ${tempPath}`);
   }
@@ -155,3 +209,39 @@ export async function startReportsWorker() {
 }
 
 export default startReportsWorker;
+
+// Función para limpiar archivos antiguos del directorio tmp
+async function cleanupOldFiles(tempDir) {
+  try {
+    const files = await fs.readdir(tempDir);
+    const now = Date.now();
+    const tenMinutes = 10 * 60 * 1000; // 10 minutos en milisegundos
+    
+    for (const file of files) {
+      // Solo procesar archivos .xlsx
+      if (!file.endsWith('.xlsx')) {
+        continue;
+      }
+      
+      const filePath = path.join(tempDir, file);
+      const stats = await fs.stat(filePath);
+      
+      // Eliminar archivos .xlsx con antiguedad de 10 minutos o más
+      if (now - stats.mtime.getTime() >= tenMinutes) {
+        await fs.unlink(filePath);
+        console.log(`🗑️ Archivo .xlsx antiguo eliminado: ${file}`);
+        
+        // Eliminar del almacenamiento en memoria también
+        const reportId = file.replace('report-', '').replace('.xlsx', '');
+        completedReports.delete(reportId);
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Error al limpiar archivos antiguos:', error.message);
+  }
+}
+
+// Función para obtener reporte completado
+export function getCompletedReport(reportId) {
+  return completedReports.get(reportId);
+}

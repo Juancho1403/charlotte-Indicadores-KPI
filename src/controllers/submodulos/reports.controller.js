@@ -2,6 +2,9 @@
 import * as reportsService from '../../services/submodulos/reports.service.js';
 import { generateExportSchema, getJobStatusSchema } from '../../schemas/submodulos/reports.schema.js';
 import { reportQueue } from '../../config/queue.js';
+import fs from 'fs/promises';
+import path from 'path';
+import { getCompletedReport } from '../../workers/reports.worker.js';
 
 export const exportReport = async (req, res) => {
     try {
@@ -31,6 +34,40 @@ export const exportReport = async (req, res) => {
     } catch (error) {
         console.error("Error en generateExport:", error);
         res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+export const downloadReport = async (req, res) => {
+    try {
+        const { job_id } = req.params;
+        
+        // Obtener información del reporte desde memoria
+        const report = getCompletedReport(job_id);
+
+        if (!report || report.status !== 'COMPLETED' || !report.filePath) {
+            return res.status(404).json({ error: 'Reporte no encontrado o no completado' });
+        }
+
+        const filePath = report.filePath;
+        
+        // Verificar que el archivo existe
+        try {
+            await fs.access(filePath);
+        } catch {
+            return res.status(404).json({ error: 'Archivo no encontrado' });
+        }
+
+        // Configurar headers para descarga
+        const fileName = `report-${job_id}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        
+        // Enviar archivo
+        res.sendFile(filePath);
+
+    } catch (error) {
+        console.error("Error en downloadReport:", error);
+        res.status(500).json({ error: error.message });
     }
 };
 
