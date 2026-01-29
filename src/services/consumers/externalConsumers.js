@@ -370,3 +370,16 @@ export async function fetchProducts(params = {}) {
   const res = await axiosJson.get(url, { params });
   return res.data;
 }
+
+/**
+ * Obtener un producto específico por ID
+ * Endpoint: GET /api/kitchen/products/{id}
+ * @param {string|number} productId - ID del producto
+ * @returns {Promise<Object>} Datos del producto
+ */
+export async function fetchProductById(productId) {
+  if (envs.USE_MOCK_SERVICES) return mock.fetchProductById(productId);
+  const url = `${envs.KDS_BASE_URL}/products/${productId}`;
+  const res = await axiosJson.get(url);
+  return res.data;
+}

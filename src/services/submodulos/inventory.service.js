@@ -1,11 +1,66 @@
+import { match } from 'assert';
 import { prisma } from '../../db/client.js';
 import { 
     fetchAllDpNoteItems, 
     fetchDpNotes,
     fetchComandas,
     fetchProducts,
+    fetchProductById,
     fetchInventoryItems 
 } from '../consumers/externalConsumers.js';
+
+/**
+ * Extraer ID de producto desde product_name con formato "Producto #id"
+ * @param {string} productName - Nombre del producto (ej: "Producto #9ef55f08-25b0-43d5-afd7-d8daa76ef7b1")
+ * @returns {string|null} ID del producto o null si no coincide el formato
+ */
+const extractProductIdFromName = (productName) => {
+    const match = productName.match(/^Producto #([a-f0-9-]+)$/i);
+    return match ? match[1] : null;
+};
+
+/**
+ * Obtener nombres reales de productos para comandas con formato "Producto #id"
+ * @param {Array} comandas - Lista de comandas
+ * @returns {Object} Objeto con mapeo de ID -> nombre de producto
+ */
+const fetchProductNamesForComandas = async (comandas) => {
+    const productIds = new Set();
+    const productMap = {};
+    
+    // Extraer IDs únicos de las comandas
+    comandas.forEach(comanda => {
+        const lines = comanda.items || comanda.order_lines || [];
+        if (Array.isArray(lines)) {
+            lines.forEach(line => {
+                const productId = extractProductIdFromName(line.product_name);
+                if (productId) {
+                    productIds.add(productId);
+                }
+            });
+        }
+    });
+    
+    // Fetch de productos en paralelo
+    if (productIds.size > 0) {
+        const productPromises = Array.from(productIds).map(async (id) => {
+            try {
+                const product = await fetchProductById(id);
+                return { id, name: product?.name || `Producto ${id}` };
+            } catch (error) {
+                console.warn(`Error fetching product ${id}:`, error.message);
+                return { id, name: `Producto ${id}` };
+            }
+        });
+        
+        const productResults = await Promise.all(productPromises);
+        productResults.forEach(({ id, name }) => {
+            productMap[id] = name;
+        });
+    }
+    
+    return productMap;
+};
 
 /**
  * Obtener Pareto (Top Ventas)
@@ -28,14 +83,96 @@ export const getPareto = async (filters = {}) => {
         const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
-        console.log(products)
-        // 3. Mapeo de nombres de productos (Objeto simple)
-        const productNames = {};
+        
+        // 2. Primero verificar qué IDs coinciden antes de hacer peticiones
+        console.log('\n🔍 Verificando coincidencias de IDs antes de obtener nombres...');
+        const productIds = new Set();
         products.forEach(p => {
             const id = String(p.id || p.product_id || '');
-            if (id) productNames[id] = p.name || 'Producto sin nombre';
+            if (id && id !== 'undefined' && id !== 'null') {
+                productIds.add(id);
+            }
         });
-        console.log("Product Names Map:", productNames);
+        
+        const comandaItemIds = new Set();
+        const comandaItemsWithExtractedIds = [];
+        
+        comandas.forEach(comanda => {
+            const lines = comanda.items || comanda.order_lines || [];
+            if (Array.isArray(lines)) {
+                lines.forEach(line => {
+                    let productId = String(line.product_id || '');
+                    const extractedId = extractProductIdFromName(line.product_name || '');
+                    if (extractedId) {
+                        productId = extractedId;
+                    }
+                    if (productId && productId !== 'undefined' && productId !== 'null') {
+                        comandaItemIds.add(productId);
+                        comandaItemsWithExtractedIds.push({
+                            ...line,
+                            comanda_id: comanda.id,
+                            final_product_id: productId
+                        });
+                    }
+                });
+            }
+        });
+        
+        const matchingIds = [...comandaItemIds].filter(id => productIds.has(id));
+        const nonMatchingIds = [...comandaItemIds].filter(id => !productIds.has(id));
+        const matchPercentage = comandaItemIds.size > 0 
+            ? ((matchingIds.length / comandaItemIds.size) * 100).toFixed(2)
+            : 0;
+            
+        console.log(`📊 Verificación de IDs: ${matchingIds.length}/${comandaItemIds.size} coinciden (${matchPercentage}%)`);
+        
+        // Mostrar IDs que coinciden
+        if (matchingIds.length > 0) {
+            console.log('✅ IDs que coinciden:');
+            matchingIds.forEach(id => {
+                const product = products.find(p => String(p.id || p.product_id) === id);
+                console.log(`  - ID: ${id} -> ${product?.name || 'Producto sin nombre'}`);
+            });
+        }
+        
+        if (nonMatchingIds.length > 0) {
+            console.log(`⚠️  Hay ${nonMatchingIds.length} IDs en comandas que no existen en products`);
+        }
+        console.log('');
+        
+        // 2.1. Obtener nombres reales SOLO para los IDs que coinciden
+        const comandaProductNames = {};
+        if (matchingIds.length > 0) {
+            console.log(`🔄 Obteniendo nombres reales para ${matchingIds.length} productos que coinciden...`);
+            const productPromises = matchingIds.map(async (id) => {
+                try {
+                    const product = await fetchProductById(id);
+                    return { id, name: product?.data.name || `Producto ${id}` };
+                } catch (error) {
+                    console.warn(`Error fetching product ${id}:`, error.message);
+                    return { id, name: `Producto ${id}` };
+                }
+            });
+            
+            const productResults = await Promise.all(productPromises);
+            productResults.forEach(({ id, name }) => {
+                comandaProductNames[id] = name;
+            });
+            console.log('✅ Nombres obtenidos exitosamente\n');
+        } else {
+            console.log('⚠️  No hay IDs coincidentes para obtener nombres\n');
+        }
+
+        // 3. Mapeo de nombres de productos (Objeto simple)
+        const productNames = {};
+        const productPrices = {}; // Nuevo mapeo de precios
+        products.forEach(p => {
+            const id = String(p.id || p.product_id || '');
+            if (id) {
+                productNames[id] = p.name || 'Producto sin nombre';
+                productPrices[id] = p.basePrice || p.base_price || 0; // Guardar precio base
+            }
+        });
         // 4. Acumulador principal (Objeto simple)
         const statsObj = {};
 
@@ -48,7 +185,7 @@ export const getPareto = async (filters = {}) => {
             if (!statsObj[pid]) {
                 statsObj[pid] = {
                     product_id: pid,
-                    name: productNames[pid] || `Producto ${pid}`,
+                    name: name || `Producto ${pid}`, // Solo establecer nombre si es nuevo
                     revenue_generated: 0,
                     quantity_sold: 0,
                     last_sale_iso: null,      // ISO completo para comparaciones
@@ -73,26 +210,51 @@ export const getPareto = async (filters = {}) => {
             }
         };
         
-        // 5. Procesar comandas (para Pareto de productos)
+        // 5. Procesar comandas (para Pareto de productos) - SOLO los que coinciden
+        let processedItems = 0;
+        let skippedItems = 0;
+        
         comandas.forEach(comanda => {
-            const lines = comanda.lines || comanda.order_lines || [];
-            const comandaDate = comanda.delivered_at || null; // Usar delivered_at como fecha
+            const lines = comanda.items || comanda.order_lines || [];
+            
+            // Determinar la fecha según el estado
+            let comandaDate = null;
+            if (comanda.status === 'PENDING' || comanda.status === 'CANCELLED') {
+                comandaDate = comanda.sent_at || null;
+            } else if (comanda.status === 'DELIVERED') {
+                comandaDate = comanda.delivered_at || null;
+            }
             if (Array.isArray(lines)) {
                 lines.forEach(line => {
-                    const price = parseFloat(line.price || 0);
                     const qty = parseFloat(line.qty || line.quantity || 0);
-                    const productId = String(line.product_id || '');
-                    const productName = productNames[productId] || `Producto ${productId}`;
-                    processItem(productId, productName, qty, (price * qty), comandaDate);
+                    let productId = String(line.product_id || '');
+                    let productName = line.product_name || '';
+                    
+                    // Si el product_name tiene formato "Producto #id", extraer el ID
+                    const extractedId = extractProductIdFromName(productName);
+                    if (extractedId) {
+                        productId = extractedId;
+                    }
+                    
+                    // VERIFICAR SI EL PRODUCTO EXISTE EN comandaProductNames (solo los que coinciden)
+                    if (comandaProductNames[productId]) {
+                        // El producto existe, usar el nombre real
+                        productName = comandaProductNames[productId];
+                        
+                        // Obtener precio base desde productos
+                        const basePrice = productPrices[productId] || 0;
+                        const calculatedSubtotal = basePrice * qty;
+                        processItem(productId, productName, qty, calculatedSubtotal, comandaDate);
+                        processedItems++;
+                    } else {
+                        // El producto NO existe en el listado de coincidencias, omitir
+                        skippedItems++;
+                    }
                 });
             }
         });
-
-        // 6. Procesar órdenes de delivery/pickup (cada orden como un "producto" con su monto total)
-        dpNoteItems.forEach(order => {
-            const orderDate = order.timestamp_creation || order.date || null; // Mantener como estaba para dpNoteItems
-            processItem(order.order_id, order.readable_id, 1, order.monto_total, orderDate);
-        });
+        
+        console.log(`📈 Procesamiento de comandas: ${processedItems} items procesados, ${skippedItems} items omitidos (no coinciden)`);
         
         // 7. Convertir el objeto a Array para ordenar
         const allProducts = Object.values(statsObj);
@@ -111,7 +273,7 @@ export const getPareto = async (filters = {}) => {
 
         const result = sortedList.slice(0, limit).map((item, index) => {
             cumulativeSum += item.revenue_generated;
-            
+
             return {
                 product_id: item.product_id,
                 name: item.name,
@@ -224,4 +386,123 @@ export const getStockAlerts = async (filters) => {
 export const getItemDetails = async (itemId) => {
     // TODO: Implementar detalle de item (Tarea futura)
     return { success: true, data: {} };
+};
+
+/**
+ * Verificar coincidencias de IDs entre products y comandas.items
+ * Muestra por consola los productos que coinciden y los que no
+ */
+export const checkProductIdMatches = async () => {
+    try {
+        console.log('🔍 Verificando coincidencias de IDs entre products y comandas.items...\n');
+        
+        // Obtener datos
+        const [productsData, comandasData] = await Promise.all([
+            fetchProducts({}),
+            fetchComandas({ status: 'CLOSED' })
+        ]);
+        
+        const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
+        const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
+        
+        // Crear conjunto de IDs de productos
+        const productIds = new Set();
+        products.forEach(product => {
+            const id = String(product.id || product.product_id || '');
+            if (id && id !== 'undefined' && id !== 'null') {
+                productIds.add(id);
+            }
+        });
+        
+        // Recolectar todos los IDs de comandas.items
+        const comandaItemIds = new Set();
+        const comandaItemsDetails = [];
+        
+        comandas.forEach(comanda => {
+            const lines = comanda.items || comanda.order_lines || [];
+            if (Array.isArray(lines)) {
+                lines.forEach(line => {
+                    let productId = String(line.product_id || '');
+                    
+                    // Si el product_name tiene formato "Producto #id", extraer el ID
+                    const extractedId = extractProductIdFromName(line.product_name || '');
+                    if (extractedId) {
+                        productId = extractedId;
+                    }
+                    
+                    if (productId && productId !== 'undefined' && productId !== 'null') {
+                        comandaItemIds.add(productId);
+                        comandaItemsDetails.push({
+                            product_id: productId,
+                            product_name: line.product_name,
+                            comanda_id: comanda.id,
+                            qty: line.qty || line.quantity
+                        });
+                    }
+                });
+            }
+        });
+        
+        // Analizar coincidencias
+        const matchingIds = [...comandaItemIds].filter(id => productIds.has(id));
+        const nonMatchingIds = [...comandaItemIds].filter(id => !productIds.has(id));
+        
+        // Mostrar resultados por consola
+        console.log('📊 RESULTADOS DE LA VERIFICACIÓN:');
+        console.log('=====================================');
+        console.log(`Total productos en BD: ${productIds.size}`);
+        console.log(`Total items en comandas: ${comandaItemIds.size}`);
+        console.log(`IDs que coinciden: ${matchingIds.length}`);
+        console.log(`IDs que NO coinciden: ${nonMatchingIds.length}\n`);
+        
+        if (matchingIds.length > 0) {
+            console.log('✅ IDs QUE COINCIDEN:');
+            matchingIds.forEach(id => {
+                const product = products.find(p => String(p.id || p.product_id) === id);
+                const comandaItems = comandaItemsDetails.filter(item => item.product_id === id);
+                console.log(`  - ID: ${id}`);
+                console.log(`    Producto: ${product?.name || 'N/A'}`);
+                console.log(`    Aparece en ${comandaItems.length} comandas`);
+            });
+            console.log('');
+        }
+        
+        if (nonMatchingIds.length > 0) {
+            console.log('❌ IDS QUE NO COINCIDEN:');
+            nonMatchingIds.forEach(id => {
+                const comandaItems = comandaItemsDetails.filter(item => item.product_id === id);
+                console.log(`  - ID: ${id}`);
+                console.log(`    Aparece en ${comandaItems.length} comandas`);
+                console.log(`    Ejemplo de producto en comanda: "${comandaItems[0]?.product_name || 'N/A'}"`);
+            });
+            console.log('');
+        }
+        
+        // Estadísticas finales
+        const matchPercentage = comandaItemIds.size > 0 
+            ? ((matchingIds.length / comandaItemIds.size) * 100).toFixed(2)
+            : 0;
+            
+        console.log('📈 ESTADÍSTICAS FINALES:');
+        console.log('========================');
+        console.log(`Porcentaje de coincidencia: ${matchPercentage}%`);
+        console.log(`Productos sin correspondencia: ${nonMatchingIds.length}/${comandaItemIds.size}`);
+        
+        return {
+            success: true,
+            stats: {
+                total_products: productIds.size,
+                total_comanda_items: comandaItemIds.size,
+                matching_ids: matchingIds.length,
+                non_matching_ids: nonMatchingIds.length,
+                match_percentage: parseFloat(matchPercentage)
+            },
+            matching_ids: matchingIds,
+            non_matching_ids: nonMatchingIds
+        };
+        
+    } catch (error) {
+        console.error('❌ Error en checkProductIdMatches:', error.message);
+        return { success: false, error: error.message };
+    }
 };
