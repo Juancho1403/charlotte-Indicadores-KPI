@@ -78,7 +78,7 @@ export const getStaffRanking = async (filters) => {
             efficiencyScore = Math.min(100, Math.max(0, Math.round(efficiencyScore)));
             
             // Determinar status basado en último login o actividad
-            const currentStatus = staff.status || (totalOrders > 0 ? "ACTIVE" : "INACTIVE");
+            const currentStatus = (staff.isActive? "ACTIVE" : "INACTIVE");
             
             return {
                 waiter_id: staffId,
