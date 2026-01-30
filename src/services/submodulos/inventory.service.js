@@ -74,13 +74,12 @@ export const getPareto = async (filters = {}) => {
     
     try {
         // 1. Fetch de datos (Sin filtros de fecha para traer todo)
-        const [dpNoteItemsData, comandasData, productsData] = await Promise.all([
-            fetchAllDpNoteItems({}),
+        const [comandasData, productsData] = await Promise.all([
             fetchComandas({ status: 'CLOSED' }),
             fetchProducts({})
         ]);
 
-        const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
+        //const dpNoteItems = Array.isArray(dpNoteItemsData) ? dpNoteItemsData : (dpNoteItemsData?.data || []);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
         

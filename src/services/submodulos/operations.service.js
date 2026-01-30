@@ -1,5 +1,5 @@
 import { prisma } from '../../db/client.js';
-import { minutesBetween, isSameUtcDate } from "../../utils/timeHelpers.js";
+import { minutesBetween, isSameUtcDate, addDays, parseISO, startOfDay, endOfDay, formatISO, buildDateBuckets, dateKey, durationSecondsForOrder, computeSlaComplianceForDurations } from "../../utils/timeHelpers.js";
 import { 
     fetchStaff, 
     fetchKdsHistory, 
@@ -82,7 +82,7 @@ export const getStaffRanking = async (filters) => {
             
             return {
                 waiter_id: staffId,
-                name: staff.name || staff.nombre || 'Staff',
+                name: staff.externalName || staff.name || staff.nombre || 'Staff',
                 total_orders: totalOrders,
                 avg_time_minutes: parseFloat(avgTimeMinutes.toFixed(1)),
                 efficiency_score: efficiencyScore,
@@ -291,6 +291,7 @@ export async function getStaffMetrics(waiter_id, query = {}) {
     const base = process.env.KITCHEN_API_BASE || '';
     const url = `${base}/api/kitchen/staff`;
     const resp = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+    console.log(resp)
     if (resp.ok) {
       staffList = await resp.json();
     } else {
