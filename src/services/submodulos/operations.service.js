@@ -140,10 +140,11 @@ export async function getSlaBreakdown(query = {}) {
     // Obtener historial de KDS que contiene comandas con estados READY/DELIVERED
     const kdsHistoryData = await fetchKdsHistory({ date: targetDate });
     const kdsHistory = Array.isArray(kdsHistoryData) ? kdsHistoryData : (kdsHistoryData?.data || []);
-    
+    console.log(kdsHistory)
+    console.log('')
     // Filtrar: solo comandas entregadas (delivered_at !== null)
     const delivered = kdsHistory.filter(c => c.delivered_at || c.finishedAt);
-
+    console.log(delivered)
     // Filtrar por fecha solicitada (basado en delivered_at)
     const deliveredOnDate = delivered.filter(c => {
       try {
@@ -173,12 +174,12 @@ export async function getSlaBreakdown(query = {}) {
       // Intentar obtener tiempo de servicio de diferentes campos
       if (c.metrics && typeof c.metrics.service_time_minutes === 'number') {
         serviceMinutes = c.metrics.service_time_minutes;
-      } else if (c.sent_at && c.delivered_at) {
-        serviceMinutes = minutesBetween(c.sent_at, c.delivered_at);
-      } else if (c.sent_at && c.deliveredAt) {
-        serviceMinutes = minutesBetween(c.sent_at, c.deliveredAt);
-      } else if (c.created_at && c.delivered_at) {
-        serviceMinutes = minutesBetween(c.created_at, c.delivered_at);
+      } else if (c.startedAt && c.finishedAt) {
+        serviceMinutes = minutesBetween(c.startedAt, c.finishedAt);
+      } else if (c.createdAt && c.finishedAt) {
+        serviceMinutes = minutesBetween(c.createdAt, c.finishedAt);
+      } else if (c.createdAt && c.deliveredAt) {
+        serviceMinutes = minutesBetween(c.createdAt, c.deliveredAt);
       } 
 
       // Clasificar en buckets según documentación:
