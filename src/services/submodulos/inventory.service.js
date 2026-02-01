@@ -218,7 +218,7 @@ export const getPareto = async (filters = {}) => {
             
             // Determinar la fecha según el estado
             let comandaDate = null;
-            if (comanda.status === 'PENDING') {
+            if (comanda.status === 'PENDING' || comanda.status === 'CANCELLED') {
                 comandaDate = comanda.sent_at || null;
             } else if (comanda.status === 'DELIVERED') {
                 comandaDate = comanda.delivered_at || null;
