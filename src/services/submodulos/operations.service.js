@@ -208,11 +208,10 @@ export async function getSlaBreakdown(query = {}) {
     // Obtener historial de KDS que contiene comandas con estados READY/DELIVERED
     const kdsHistoryData = await fetchKdsHistory({ date: targetDate });
     const kdsHistory = Array.isArray(kdsHistoryData) ? kdsHistoryData : (kdsHistoryData?.data || []);
-    console.log(kdsHistory)
-    console.log('')
+    
     // Filtrar: solo comandas entregadas (delivered_at !== null)
     const delivered = kdsHistory.filter(c => c.delivered_at || c.finishedAt);
-    console.log(delivered)
+
     // Filtrar por fecha solicitada (basado en delivered_at)
     const deliveredOnDate = delivered.filter(c => {
       try {

@@ -207,7 +207,6 @@ export async function fetchStaff(params = {}, axiosConfig = {}) {
   }
   const url = `${envs.KDS_BASE_URL}/staff`;
   const res = await axiosJson.get(url, { params, ...axiosConfig });
-  console.log(res.data);
   return res.data;
 }
 
@@ -351,7 +350,6 @@ export async function fetchDpPayments(params = {}) {
 export async function fetchInventoryItems(params = {}) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchInventoryItems(params);
   const authConfig = await getAxiosAuthConfig();
-  console.log(authConfig)
   const url = `${envs.INVENTORY_BASE_URL}/items`;
   const queryParams = { type: 'INGREDIENT', stockStatus: 'OK', ...params };
   const res = await axios.get(url, { params: queryParams, ...authConfig });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const getDashboardSummarySchema = z.object({
     query: z.object({
         date: z.string().date().optional(),
+        quarterly_start_date: z.string().date().optional(),
         store_id: z.coerce.number().optional(),
         force_refresh: z.coerce.boolean().optional(),
     }),

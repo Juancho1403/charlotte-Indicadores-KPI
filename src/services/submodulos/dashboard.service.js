@@ -18,8 +18,10 @@ const extractProductIdFromName = (productName) => {
 };
 
 export const getSummary = async (filters) => {
-    const { date, force_refresh, store_id } = filters;
+    const { date, quarterly_start_date, store_id } = filters;
     const targetDate = date ? new Date(date) : new Date();
+    // Normalizar la hora para incluir el día completo
+    targetDate.setHours(0, 0, 0, 0);
     const targetDateStr = targetDate.toISOString().slice(0, 10);
 
     let totalRevenue = 0;
@@ -43,12 +45,19 @@ export const getSummary = async (filters) => {
     });
     const target = Number(meta?.montoObjetivo || 450000);
     let quarterlyStartDate;
-    if (meta?.fechaInicio) {
+    
+    // Usar quarterly_start_date si se proporciona, si no usar la lógica existente
+    if (quarterly_start_date) {
+        quarterlyStartDate = new Date(quarterly_start_date);
+        quarterlyStartDate.setHours(0, 0, 0, 0);
+    } else if (meta?.fechaInicio) {
         quarterlyStartDate = meta.fechaInicio;
+        quarterlyStartDate.setHours(0, 0, 0, 0);
     } else {
         // Si no hay fecha de inicio definida, tomar hace un trimestre (3 meses)
         quarterlyStartDate = new Date(targetDate);
         quarterlyStartDate.setMonth(quarterlyStartDate.getMonth() - 3);
+        quarterlyStartDate.setHours(0, 0, 0, 0);
     }
     const quarterlyStartDateStr = quarterlyStartDate.toISOString().slice(0, 10);
 
@@ -56,11 +65,7 @@ export const getSummary = async (filters) => {
     try {
         console.log("Fetching Comandas from ATC for quarterly range:", quarterlyStartDateStr, "to", targetDateStr);
         const [comandasData, productsData] = await Promise.all([
-            fetchComandas({ 
-                date_from: quarterlyStartDateStr, 
-                date_to: targetDateStr,
-                status: 'CLOSED' 
-            }),
+            fetchComandas({}),
             fetchProducts({})
         ]);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
@@ -77,11 +82,14 @@ export const getSummary = async (filters) => {
         
         // Filtrar por rango de fechas y estado
         const filtered = comandas.filter(c => {
-            const createdDate = c.delivered_at || c.sent_at  || c.timestamp_creation || '';
+            const createdDate = c.delivered_at || c.sent_at || c.timestamp_creation || '';
+            if (!createdDate) return false;
+            
             const date = new Date(createdDate);
-            return date >= quarterlyStartDate && date <= targetDate && 
-                   createdDate.toString().slice(0, 10) >= quarterlyStartDateStr &&
-                   createdDate.toString().slice(0, 10) <= targetDateStr;
+            if (isNaN(date.getTime())) return false;
+            
+            // Comparación directa de fechas sin doble filtrado
+            return date >= quarterlyStartDate && date <= targetDate;
         });
         
         // Procesar cada comanda para calcular revenue con precios base
@@ -152,19 +160,19 @@ export const getSummary = async (filters) => {
     // 2. Fetch dp_notes de Delivery/Pickup - obtener todos y filtrar por rango trimestral
     try {
         console.log("Fetching dp_notes from Delivery for quarterly range:", quarterlyStartDateStr, "to", targetDateStr);
-        const dpNotesData = await fetchDpNotes({ 
-            date_from: quarterlyStartDateStr, 
-            date_to: targetDateStr 
-        });
+        const dpNotesData = await fetchDpNotes({});
         const dpNotes = Array.isArray(dpNotesData) ? dpNotesData : (dpNotesData?.data || []);
         
         dpNotes.forEach(note => {
             // Filtrar por rango de fechas y excluir canceladas
             const noteDate = note.created_at || note.timestamp_creation || '';
+            if (!noteDate) return;
+            
             const date = new Date(noteDate);
-            if (date >= quarterlyStartDate && date <= targetDate && 
-                noteDate.toString().slice(0, 10) >= quarterlyStartDateStr &&
-                noteDate.toString().slice(0, 10) <= targetDateStr) {
+            if (isNaN(date.getTime())) return;
+            
+            // Comparación directa de fechas
+            if (date >= quarterlyStartDate && date <= targetDate) {
                 
                 const revenue = Number(note.monto_total || note.total_amount || 0);
                 const status = (note.current_status || note.status)?.toUpperCase();
@@ -201,12 +209,26 @@ export const getSummary = async (filters) => {
         
         // Obtener comandas del día anterior
         try {
-            const previousComandasData = await fetchComandas({ date: previousDateStr, status: 'CLOSED' });
+            const previousComandasData = await fetchComandas({});
             const previousComandas = Array.isArray(previousComandasData) ? previousComandasData : (previousComandasData?.data || []);
             
             previousComandas.forEach(c => {
-                if (c.status !== 'CANCELLED' && c.status !== 'CANCELED') {
-                    previousRevenue += Number(c.total || c.monto_total || 0);
+                // Filtrar por fecha del día anterior
+                let comandaDate;
+                if (c.status === 'DELIVERED' && c.delivered_at) {
+                    comandaDate = new Date(c.delivered_at);
+                } else if ((c.status === 'PENDING' || c.status === 'CANCELLED' || c.status === 'CANCELED') && c.sent_at) {
+                    comandaDate = new Date(c.sent_at);
+                }
+                
+                if (comandaDate && !isNaN(comandaDate.getTime())) {
+                    // Normalizar fecha para comparación
+                    const normalizedComandaDate = new Date(comandaDate);
+                    normalizedComandaDate.setHours(0, 0, 0, 0);
+                    
+                    if (normalizedComandaDate.getTime() === previousDate.getTime()) {
+                        previousRevenue += Number(c.total || c.monto_total || 0);
+                    }
                 }
             });
         } catch (e) {
@@ -215,12 +237,23 @@ export const getSummary = async (filters) => {
         
         // Obtener delivery del día anterior
         try {
-            const previousDpNotesData = await fetchDpNotes({ date: previousDateStr });
+            const previousDpNotesData = await fetchDpNotes({});
             const previousDpNotes = Array.isArray(previousDpNotesData) ? previousDpNotesData : (previousDpNotesData?.data || []);
             
             previousDpNotes.forEach(note => {
-                if (note.status !== 'CANCELLED' && note.status !== 'CANCELED') {
-                    previousRevenue += Number(note.monto_total || note.total_amount || 0);
+                // Filtrar por fecha del día anterior
+                const noteDate = note.created_at || note.timestamp_creation || '';
+                if (noteDate) {
+                    const date = new Date(noteDate);
+                    if (!isNaN(date.getTime())) {
+                        // Normalizar fecha para comparación
+                        const normalizedDate = new Date(date);
+                        normalizedDate.setHours(0, 0, 0, 0);
+                        
+                        if (normalizedDate.getTime() === previousDate.getTime()) {
+                            previousRevenue += Number(note.monto_total || note.total_amount || 0);
+                        }
+                    }
                 }
             });
         } catch (e) {
@@ -271,26 +304,6 @@ export const getSummary = async (filters) => {
         console.warn("Error calculating avg service time:", e.message); 
     }
 
-    // 4. Calcular rotación de mesas
-    // Fórmula: (clientes_unicos / mesas_activas) / horas_operativas
-    let tableRotation = 0;
-    try {
-        const mesasData = await fetchMesas({ date: targetDateStr });
-        const mesas = Array.isArray(mesasData) ? mesasData : (mesasData?.data || []);
-        const mesasActivas = mesas.filter(m => m.status === 'OCCUPIED' || m.status === 'AVAILABLE').length;
-        
-        const clienteTemporalData = await fetchClienteTemporal({ date: targetDateStr });
-        const clientes = Array.isArray(clienteTemporalData) ? clienteTemporalData : (clienteTemporalData?.data || []);
-        const clientesUnicos = new Set(clientes.map(c => c.mesa_id || c.table_id)).size;
-        
-        // Asumir 8 horas operativas por defecto
-        const horasOperativas = 8;
-        if (mesasActivas > 0) {
-            tableRotation = (clientesUnicos / mesasActivas) / horasOperativas;
-        }
-    } catch (e) { 
-        console.warn("Error calculating table rotation:", e.message); 
-    }
 
     // Para quarterly goal, acumulado desde inicio del trimestre hasta la fecha pedida
     const acumulado = totalRevenue;
@@ -300,8 +313,6 @@ export const getSummary = async (filters) => {
     // Por ahora usamos valores por defecto
     const timeStatus = avgServiceTimeMinutes <= 5 ? "OPTIMAL" : 
                       avgServiceTimeMinutes <= 10 ? "WARNING" : "CRITICAL";
-    const rotationStatus = tableRotation >= 1.0 ? "OPTIMAL" : 
-                          tableRotation >= 0.5 ? "WARNING" : "CRITICAL";
     const goalStatus = progressPct >= 80 ? "ON_TRACK" : 
                        progressPct >= 50 ? "AT_RISK" : "OFF_TRACK";
 
@@ -327,17 +338,6 @@ export const getSummary = async (filters) => {
         }
     };
 
-    // Verificar que la suma de ganancias por categoría coincida con el total
-    const totalByCategories = revenueByStatus.DELIVERED + revenueByStatus.PENDING + revenueByStatus.CANCELLED;
-    console.log("=== VERIFICACIÓN DE GANANCIAS ===");
-    console.log("Total Revenue:", totalRevenue);
-    console.log("Suma por categorías:", totalByCategories);
-    console.log("¿Coinciden?", totalRevenue === totalByCategories ? "✅ SÍ" : "❌ NO");
-    console.log("DELIVERED:", revenueByStatus.DELIVERED);
-    console.log("PENDING:", revenueByStatus.PENDING);
-    console.log("CANCELLED:", revenueByStatus.CANCELLED);
-    console.log("===============================");
-
     return {
         success: true,
         timestamp: new Date().toISOString(),
@@ -358,9 +358,7 @@ export const getSummary = async (filters) => {
             },
             operations: {
                 avg_service_time: avgServiceTimeFormatted,
-                time_status: timeStatus,
-                table_rotation: parseFloat(tableRotation.toFixed(2)),
-                rotation_status: rotationStatus
+                time_status: timeStatus
             }
         }
     };
@@ -373,9 +371,13 @@ export const getSummaryRange = async (filters) => {
     
     // Determinar rango de fechas según los parámetros
     if (date_from && date_to) {
-        // Rango de fechas específico
+        // Rango de fechas específico - normalizar horas para comparación correcta
         startDate = new Date(date_from);
         endDate = new Date(date_to);
+        
+        // Normalizar horas para incluir el día completo
+        startDate.setHours(0, 0, 0, 0); // Inicio del día
+        endDate.setHours(23, 59, 59, 999); // Fin del día
         
         // Si es un solo día, analizar por horas
         if (date_from === date_to) {
@@ -388,29 +390,46 @@ export const getSummaryRange = async (filters) => {
         
         switch (period.toLowerCase()) {
             case 'day':
-                // Para día, usar solo el día actual
+                // Para día, usar solo el día actual (establecer hora a inicio y fin del día)
                 startDate = new Date();
+                startDate.setHours(0, 0, 0, 0); // Inicio del día
                 endDate = new Date();
+                endDate.setHours(23, 59, 59, 999); // Fin del día
                 isHourlyAnalysis = true; // Análisis por horas para períodos de día
                 break;
             case 'week':
                 startDate.setDate(endDate.getDate() - 7);
+                // Normalizar horas para comparación correcta
+                startDate.setHours(0, 0, 0, 0);
+                endDate.setHours(23, 59, 59, 999);
                 break;
             case 'month':
                 startDate.setMonth(endDate.getMonth() - 1);
+                // Normalizar horas para comparación correcta
+                startDate.setHours(0, 0, 0, 0);
+                endDate.setHours(23, 59, 59, 999);
                 break;
             case 'year':
                 startDate.setFullYear(endDate.getFullYear() - 1);
+                // Normalizar horas para comparación correcta
+                startDate.setHours(0, 0, 0, 0);
+                endDate.setHours(23, 59, 59, 999);
                 break;
             default:
                 // Si no se reconoce el período, usar última semana
                 startDate.setDate(endDate.getDate() - 7);
+                // Normalizar horas para comparación correcta
+                startDate.setHours(0, 0, 0, 0);
+                endDate.setHours(23, 59, 59, 999);
         }
     } else {
         // Sin parámetros, devolver todos los datos (último mes por defecto)
         endDate = new Date();
         startDate = new Date();
         startDate.setMonth(endDate.getMonth() - 1);
+        // Normalizar horas para comparación correcta
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
     }
     
     // Asegurar que las fechas estén en formato ISO para la API
@@ -435,15 +454,12 @@ export const getSummaryRange = async (filters) => {
     // Obtener datos de comandas
     try {
         const [comandasData, productsData] = await Promise.all([
-            fetchComandas({ 
-                date_from: startDateStr, 
-                date_to: endDateStr
-            }),
+            fetchComandas({}),
             fetchProducts({})
         ]);
         const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
         const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
-        
+
         // Crear mapeo de precios base de productos
         const productPrices = {};
         products.forEach(p => {
@@ -472,7 +488,7 @@ export const getSummaryRange = async (filters) => {
                 } else if ((comanda.status === 'PENDING' || comanda.status === 'CANCELLED' || comanda.status === 'CANCELED') && comanda.sent_at) {
                     date = new Date(comanda.sent_at);
                 }
-                
+                console.log(date)
                 // Calcular revenue usando precios base de productos
                 const lines = comanda.items || comanda.order_lines || [];
                 if (Array.isArray(lines)) {
@@ -514,21 +530,34 @@ export const getSummaryRange = async (filters) => {
                     comandaRevenue = Number(comanda.total || 0);
                 }
                 
-                // Filtrar por rango de fechas
-                if (date && date >= startDate && date <= endDate) {
-                    if (isHourlyAnalysis) {
-                        // Agrupar por hora del día
-                        const hour = date.getHours();
-                        dataStructure[hour].revenue += comandaRevenue;
-                        dataStructure[hour].orders += 1;
-                    } else {
-                        // Agrupar por día
-                        const dateStr = date.toISOString().slice(0, 10);
-                        if (!dataStructure[dateStr]) {
-                            dataStructure[dateStr] = { revenue: 0, orders: 0 };
+                // Filtrar por rango de fechas - normalizar fechas para comparación correcta
+                if (date) {
+                    // Normalizar fecha a inicio del día para comparación
+                    const normalizedDate = new Date(date);
+                    normalizedDate.setHours(0, 0, 0, 0);
+                    
+                    // Normalizar startDate y endDate para comparación
+                    const normalizedStart = new Date(startDate);
+                    normalizedStart.setHours(0, 0, 0, 0);
+                    const normalizedEnd = new Date(endDate);
+                    normalizedEnd.setHours(0, 0, 0, 0);
+                    
+                    // Verificar que la fecha esté dentro del rango (IMPORTANTE: para ambos casos)
+                    if (normalizedDate >= normalizedStart && normalizedDate <= normalizedEnd) {
+                        if (!isHourlyAnalysis) {
+                            // Agrupar por día
+                            const dateStr = date.toISOString().slice(0, 10);
+                            if (!dataStructure[dateStr]) {
+                                dataStructure[dateStr] = { revenue: 0, orders: 0 };
+                            }
+                            dataStructure[dateStr].revenue += comandaRevenue;
+                            dataStructure[dateStr].orders += 1;
+                        } else {
+                            // Agrupar por hora del día (SOLO si está en el rango correcto)
+                            const hour = date.getHours();
+                            dataStructure[hour].revenue += comandaRevenue;
+                            dataStructure[hour].orders += 1;
                         }
-                        dataStructure[dateStr].revenue += comandaRevenue;
-                        dataStructure[dateStr].orders += 1;
                     }
                 }
             }
@@ -539,10 +568,7 @@ export const getSummaryRange = async (filters) => {
     
     // Obtener datos de delivery/pickup
     try {
-        const dpNotesData = await fetchDpNotes({ 
-            date_from: startDateStr, 
-            date_to: endDateStr 
-        });
+        const dpNotesData = await fetchDpNotes({});
         const dpNotes = Array.isArray(dpNotesData) ? dpNotesData : (dpNotesData?.data || []);
         
         dpNotes.forEach(note => {
@@ -555,25 +581,43 @@ export const getSummaryRange = async (filters) => {
                                 note.current_status === 'CANCELED' ||
                                 note.current_status === 'DELIVERED'; // Mantener los entregados
             
-            if (isValidStatus && note.timestamp_creation) {
-                const revenue = Number(note.monto_total || 0);
-                const date = new Date(note.timestamp_creation);
+            if (isValidStatus) {
+                const noteDate = note.created_at || note.timestamp_creation || '';
+                if (!noteDate) return;
                 
-                // Filtrar por rango de fechas
-                if (date >= startDate && date <= endDate) {
-                    if (isHourlyAnalysis) {
-                        // Agrupar por hora del día
-                        const hour = date.getHours();
-                        dataStructure[hour].revenue += revenue;
-                        dataStructure[hour].orders += 1;
-                    } else {
-                        // Agrupar por día
-                        const dateStr = date.toISOString().slice(0, 10);
-                        if (!dataStructure[dateStr]) {
-                            dataStructure[dateStr] = { revenue: 0, orders: 0 };
+                const date = new Date(noteDate);
+                if (isNaN(date.getTime())) return;
+                console.log(date)
+                const revenue = Number(note.monto_total || 0);
+                
+                // Filtrar por rango de fechas - normalizar fechas para comparación correcta
+                if (date) {
+                    // Normalizar fecha a inicio del día para comparación
+                    const normalizedDate = new Date(date);
+                    normalizedDate.setHours(0, 0, 0, 0);
+                    
+                    // Normalizar startDate y endDate para comparación
+                    const normalizedStart = new Date(startDate);
+                    normalizedStart.setHours(0, 0, 0, 0);
+                    const normalizedEnd = new Date(endDate);
+                    normalizedEnd.setHours(0, 0, 0, 0);
+                    
+                    // Verificar que la fecha esté dentro del rango (IMPORTANTE: para ambos casos)
+                    if (normalizedDate >= normalizedStart && normalizedDate <= normalizedEnd) {
+                        if (!isHourlyAnalysis) {
+                            // Agrupar por día
+                            const dateStr = date.toISOString().slice(0, 10);
+                            if (!dataStructure[dateStr]) {
+                                dataStructure[dateStr] = { revenue: 0, orders: 0 };
+                            }
+                            dataStructure[dateStr].revenue += revenue;
+                            dataStructure[dateStr].orders += 1;
+                        } else {
+                            // Agrupar por hora del día (SOLO si está en el rango correcto)
+                            const hour = date.getHours();
+                            dataStructure[hour].revenue += revenue;
+                            dataStructure[hour].orders += 1;
                         }
-                        dataStructure[dateStr].revenue += revenue;
-                        dataStructure[dateStr].orders += 1;
                     }
                 }
             }
@@ -603,36 +647,50 @@ export const getSummaryRange = async (filters) => {
         try {
             let previousStart, previousEnd;
             
-            if (period === 'day') {
+            if (period === 'day' || (date_from && date_to && date_from === date_to)) {
+                // Para día anterior, establecer hora completa del día anterior
                 previousEnd = new Date(startDate);
-                previousStart = new Date(startDate);
-                previousStart.setDate(previousStart.getDate() - 1);
-                previousEnd = previousStart
-            } else if (date_from && date_to && date_from === date_to) {
-                previousEnd = new Date(startDate);
-                previousStart = new Date(startDate);
-                previousStart.setDate(previousStart.getDate() - 1);
-                previousEnd = previousStart
+                previousEnd.setDate(previousEnd.getDate() - 1);
+                previousEnd.setHours(23, 59, 59, 999); // Fin del día anterior
+                
+                previousStart = new Date(previousEnd);
+                previousStart.setHours(0, 0, 0, 0); // Inicio del día anterior
             } else if (period === 'week') {
                 previousEnd = new Date(startDate);
                 previousStart = new Date(startDate);
                 previousStart.setDate(previousStart.getDate() - 7);
-                previousEnd = previousStart
+                previousEnd = new Date(previousStart);
+                previousEnd.setDate(previousEnd.getDate() + 6); // Una semana completa
+                // Normalizar horas
+                previousStart.setHours(0, 0, 0, 0);
+                previousEnd.setHours(23, 59, 59, 999);
             } else if (period === 'month') {
                 previousEnd = new Date(startDate);
                 previousStart = new Date(startDate);
                 previousStart.setMonth(previousStart.getMonth() - 1);
-                previousEnd = previousStart
+                previousEnd = new Date(previousStart);
+                previousEnd.setMonth(previousEnd.getMonth() + 1);
+                previousEnd.setDate(previousEnd.getDate() - 1); // Fin del mes anterior
+                // Normalizar horas
+                previousStart.setHours(0, 0, 0, 0);
+                previousEnd.setHours(23, 59, 59, 999);
             } else if (period === 'year') {
                 previousEnd = new Date(startDate);
                 previousStart = new Date(startDate);
                 previousStart.setFullYear(previousStart.getFullYear() - 1);
-                previousEnd = previousStart
+                previousEnd = new Date(previousStart);
+                previousEnd.setFullYear(previousEnd.getFullYear() + 1);
+                previousEnd.setDate(previousEnd.getDate() - 1); // Fin del año anterior
+                // Normalizar horas
+                previousStart.setHours(0, 0, 0, 0);
+                previousEnd.setHours(23, 59, 59, 999);
             } else {
                 const currentDuration = endDate.getTime() - startDate.getTime();
-                previousEnd = new Date(startDate);
                 previousStart = new Date(startDate.getTime() - currentDuration);
-                previousEnd = previousStart
+                previousEnd = new Date(startDate.getTime() - currentDuration + currentDuration);
+                // Normalizar horas para rangos personalizados
+                previousStart.setHours(0, 0, 0, 0);
+                previousEnd.setHours(23, 59, 59, 999);
             }
             
             const previousStartStr = previousStart.toISOString().slice(0, 10);
@@ -654,10 +712,7 @@ export const getSummaryRange = async (filters) => {
             
             // Obtener datos del período anterior para comandas
             try {
-                const previousComandasData = await fetchComandas({ 
-                    date_from: previousStartStr, 
-                    date_to: previousEndStr
-                });
+                const previousComandasData = await fetchComandas({});
                 const previousComandas = Array.isArray(previousComandasData) ? previousComandasData : (previousComandasData?.data || []);
                 
                 previousComandas.forEach(comanda => {
@@ -676,26 +731,36 @@ export const getSummaryRange = async (filters) => {
                             date = new Date(comanda.sent_at);
                         }
                         
-                        if (date && date >= previousStart && date <= previousEnd) {
-                            previousRevenue += revenue;
-                            previousOrders += 1;
+                        if (date && !isNaN(date.getTime())) {
+                            // Normalizar fecha a inicio del día para comparación
+                            const normalizedDate = new Date(date);
+                            normalizedDate.setHours(0, 0, 0, 0);
                             
-                            if (isHourlyAnalysis===false) {
-                                const dateStr = date.toISOString().slice(0, 10);
-                                if (!previousDataStructure[dateStr]) {
-                                    previousDataStructure[dateStr] = { revenue: 0, orders: 0 };
+                            // Normalizar previousStart y previousEnd para comparación
+                            const normalizedPreviousStart = new Date(previousStart);
+                            normalizedPreviousStart.setHours(0, 0, 0, 0);
+                            const normalizedPreviousEnd = new Date(previousEnd);
+                            normalizedPreviousEnd.setHours(0, 0, 0, 0); // Mantener misma lógica que en filtrado actual
+                            
+                            // Verificar que la fecha esté dentro del rango (IMPORTANTE: para ambos casos)
+                            if (normalizedDate >= normalizedPreviousStart && normalizedDate <= normalizedPreviousEnd) {
+                                if (!isHourlyAnalysis) {
+                                    previousRevenue += revenue;
+                                    previousOrders += 1;
+                                    
+                                    const dateStr = date.toISOString().slice(0, 10);
+                                    if (!previousDataStructure[dateStr]) {
+                                        previousDataStructure[dateStr] = { revenue: 0, orders: 0 };
+                                    }
+                                    previousDataStructure[dateStr].revenue += revenue;
+                                    previousDataStructure[dateStr].orders += 1;
+                                } else {
+                                    // Agrupar por hora del día (SOLO si está en el rango correcto)
+                                    const hour = date.getHours();
+                                    previousDataStructure[hour].revenue += revenue;
+                                    previousDataStructure[hour].orders += 1;
                                 }
-                                previousDataStructure[dateStr].revenue += revenue;
-                                previousDataStructure[dateStr].orders += 1;
                             }
-                        }
-                        if (date && isHourlyAnalysis) {
-                            previousRevenue += revenue;
-                            previousOrders += 1;
-
-                            const hour = date.getHours();
-                            previousDataStructure[hour].revenue += revenue;
-                            previousDataStructure[hour].orders += 1;
                         }
                     }
                 });
@@ -705,10 +770,7 @@ export const getSummaryRange = async (filters) => {
                 
                 // Obtener datos del período anterior para delivery/pickup
             try {
-                const previousDpNotesData = await fetchDpNotes({ 
-                    date_from: previousStartStr, 
-                    date_to: previousEndStr 
-                });
+                const previousDpNotesData = await fetchDpNotes({});
                 const previousDpNotes = Array.isArray(previousDpNotesData) ? previousDpNotesData : (previousDpNotesData?.data || []);
                 
                 previousDpNotes.forEach(note => {
@@ -719,30 +781,45 @@ export const getSummaryRange = async (filters) => {
                                         note.current_status === 'CANCELED' ||
                                         note.current_status === 'DELIVERED';
                     
-                    if (isValidStatus && note.timestamp_creation) {
+                    if (isValidStatus) {
+                        const noteDate = note.created_at || note.timestamp_creation || '';
+                        if (!noteDate) return;
+                        
+                        const date = new Date(noteDate);
+                        if (isNaN(date.getTime())) return;
+                        
                         const revenue = Number(note.monto_total || 0);
-                        const date = new Date(note.timestamp_creation);
 
-                        if (date >= previousStart && date <= previousEnd) {
-                            previousRevenue += revenue;
-                            previousOrders += 1;
+                        if (date) {
+                            // Normalizar fecha a inicio del día para comparación
+                            const normalizedDate = new Date(date);
+                            normalizedDate.setHours(0, 0, 0, 0);
                             
-                            if (isHourlyAnalysis===false) {
-                                const dateStr = date.toISOString().slice(0, 10);
-                                if (!previousDataStructure[dateStr]) {
-                                    previousDataStructure[dateStr] = { revenue: 0, orders: 0 };
+                            // Normalizar previousStart y previousEnd para comparación
+                            const normalizedPreviousStart = new Date(previousStart);
+                            normalizedPreviousStart.setHours(0, 0, 0, 0);
+                            const normalizedPreviousEnd = new Date(previousEnd);
+                            normalizedPreviousEnd.setHours(0, 0, 0, 0); // Mantener misma lógica que filtrado actual
+                            
+                            // Verificar que la fecha esté dentro del rango (IMPORTANTE: para ambos casos)
+                            if (normalizedDate >= normalizedPreviousStart && normalizedDate <= normalizedPreviousEnd) {
+                                if (!isHourlyAnalysis) {
+                                    previousRevenue += revenue;
+                                    previousOrders += 1;
+                                    
+                                    const dateStr = date.toISOString().slice(0, 10);
+                                    if (!previousDataStructure[dateStr]) {
+                                        previousDataStructure[dateStr] = { revenue: 0, orders: 0 };
+                                    }
+                                    previousDataStructure[dateStr].revenue += revenue;
+                                    previousDataStructure[dateStr].orders += 1;
+                                } else {
+                                    // Agrupar por hora del día (SOLO si está en el rango correcto)
+                                    const hour = date.getHours();
+                                    previousDataStructure[hour].revenue += revenue;
+                                    previousDataStructure[hour].orders += 1;
                                 }
-                                previousDataStructure[dateStr].revenue += revenue;
-                                previousDataStructure[dateStr].orders += 1;
                             }
-                        }
-                        else if (isHourlyAnalysis) {
-                            previousRevenue += revenue;
-                            previousOrders += 1;
-
-                            const hour = date.getHours();
-                            previousDataStructure[hour].revenue += revenue;
-                            previousDataStructure[hour].orders += 1;
                         }
                     }
                 });
@@ -768,21 +845,33 @@ export const getSummaryRange = async (filters) => {
             const currentRevenue = revenueData.reduce((a, b) => a + b, 0);
             const currentOrders = ordersData.reduce((a, b) => a + b, 0);
             
-            const revenueChange = previousRevenue > 0 ? 
-                ((currentRevenue - previousRevenue) / previousRevenue) * 100 : 0;
-            const ordersChange = previousOrders > 0 ? 
-                ((currentOrders - previousOrders) / previousOrders) * 100 : 0;
+            // Calcular revenue y orders anteriores usando la misma estructura que los datos actuales
+            let previousRevenueCalc = 0;
+            let previousOrdersCalc = 0;
+            
+            if (isHourlyAnalysis) {
+                previousRevenueCalc = previousRevenueData.reduce((a, b) => a + b, 0);
+                previousOrdersCalc = previousOrdersData.reduce((a, b) => a + b, 0);
+            } else {
+                previousRevenueCalc = previousRevenueData.reduce((a, b) => a + b, 0);
+                previousOrdersCalc = previousOrdersData.reduce((a, b) => a + b, 0);
+            }
+            
+            const revenueChange = previousRevenueCalc > 0 ? 
+                ((currentRevenue - previousRevenueCalc) / previousRevenueCalc) * 100 : 0;
+            const ordersChange = previousOrdersCalc > 0 ? 
+                ((currentOrders - previousOrdersCalc) / previousOrdersCalc) * 100 : 0;
             
             return {
                 revenue: {
                     current: currentRevenue,
-                    previous: previousRevenue,
+                    previous: previousRevenueCalc,
                     change_percentage: parseFloat(revenueChange.toFixed(1)),
                     trend_direction: revenueChange > 0 ? 'up' : revenueChange < 0 ? 'down' : 'flat'
                 },
                 orders: {
                     current: currentOrders,
-                    previous: previousOrders,
+                    previous: previousOrdersCalc,
                     change_percentage: parseFloat(ordersChange.toFixed(1)),
                     trend_direction: ordersChange > 0 ? 'up' : ordersChange < 0 ? 'down' : 'flat'
                 },
