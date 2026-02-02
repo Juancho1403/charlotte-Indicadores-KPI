@@ -20,9 +20,10 @@ const extractProductIdFromName = (productName) => {
 export const getSummary = async (filters) => {
     const { date, quarterly_start_date, store_id } = filters;
     const targetDate = date ? new Date(date) : new Date();
-    // Normalizar la hora para incluir el día completo
-    targetDate.setHours(0, 0, 0, 0);
+    // Crear la cadena de fecha antes de modificar la hora
     const targetDateStr = targetDate.toISOString().slice(0, 10);
+    // Normalizar la hora para incluir el día completo (para otras partes del código)
+    targetDate.setHours(23, 59, 59, 999);
 
     let totalRevenue = 0;
     let totalOrders = 0;
@@ -80,17 +81,39 @@ export const getSummary = async (filters) => {
             }
         });
         
-        // Filtrar por rango de fechas y estado
+        // Filtrar por fecha específica (no rango trimestral) para ticket promedio del día
+        console.log("Filtering comandas for date:", targetDateStr);
         const filtered = comandas.filter(c => {
-            const createdDate = c.delivered_at || c.sent_at || c.timestamp_creation || '';
+            const isValidStatus = c.status === 'DELIVERED' || 
+                                c.status === 'PENDING' || 
+                                c.status === 'CANCELLED' || 
+                                c.status === 'CANCELED';
+            
+            if (!isValidStatus) return false;
+            
+            let createdDate;
+            if (c.status === 'DELIVERED' && c.delivered_at) {
+                createdDate = c.delivered_at;
+            } else if ((c.status === 'PENDING' || c.status === 'CANCELLED' || c.status === 'CANCELED') && c.sent_at) {
+                createdDate = c.sent_at;
+            } else {
+                return false;
+            }
+            
             if (!createdDate) return false;
             
             const date = new Date(createdDate);
             if (isNaN(date.getTime())) return false;
             
-            // Comparación directa de fechas sin doble filtrado
-            return date >= quarterlyStartDate && date <= targetDate;
+            // Comparar solo la fecha (sin hora) con la fecha objetivo
+            const comandaDateStr = date.toISOString().slice(0, 10);
+            const matches = comandaDateStr === targetDateStr;
+            if (matches) {
+                console.log("Found matching comanda:", { id: c.id, status: c.status, createdDate, comandaDateStr });
+            }
+            return matches;
         });
+        console.log("Filtered comandas count:", filtered.length);
         
         // Procesar cada comanda para calcular revenue con precios base
         for (const c of filtered) {
@@ -135,6 +158,7 @@ export const getSummary = async (filters) => {
             
             // Si no hay items con precios válidos, usar el total original como fallback
             if (!hasValidItems) {
+                console.log(c)
                 comandaRevenue = Number(c.total || c.monto_total || 0);
             }
             
@@ -142,7 +166,7 @@ export const getSummary = async (filters) => {
             if (status === 'DELIVERED') {
                 revenueByStatus.DELIVERED += comandaRevenue;
                 ordersByStatus.DELIVERED++;
-            } else if (status === 'PENDING' || status === 'PENDING_REVIEW' || status === 'IN_KITCHEN') {
+            } else if (status === 'PENDING') {
                 revenueByStatus.PENDING += comandaRevenue;
                 ordersByStatus.PENDING++;
             } else if (status === 'CANCELLED' || status === 'CANCELED') {
@@ -163,36 +187,51 @@ export const getSummary = async (filters) => {
         const dpNotesData = await fetchDpNotes({});
         const dpNotes = Array.isArray(dpNotesData) ? dpNotesData : (dpNotesData?.data || []);
         
+        console.log("Filtering dp_notes for date:", targetDateStr);
+        let dpNoteMatches = 0;
         dpNotes.forEach(note => {
-            // Filtrar por rango de fechas y excluir canceladas
-            const noteDate = note.created_at || note.timestamp_creation || '';
-            if (!noteDate) return;
+            // Incluir pedidos en estados EN_ROUTE, PENDING_REVIEW, IN_KITCHEN y CANCELLED
+            // Además de los estados que ya se incluían - misma lógica que getSummaryRange
+            const isValidStatus = note.current_status === 'EN_ROUTE' || 
+                                note.current_status === 'PENDING_REVIEW' || 
+                                note.current_status === 'IN_KITCHEN' || 
+                                note.current_status === 'CANCELLED' || 
+                                note.current_status === 'CANCELED' ||
+                                note.current_status === 'DELIVERED'; // Mantener los entregados
             
-            const date = new Date(noteDate);
-            if (isNaN(date.getTime())) return;
-            
-            // Comparación directa de fechas
-            if (date >= quarterlyStartDate && date <= targetDate) {
+            if (isValidStatus) {
+                const noteDate = note.created_at || note.timestamp_creation || '';
+                if (!noteDate) return;
                 
-                const revenue = Number(note.monto_total || note.total_amount || 0);
-                const status = (note.current_status || note.status)?.toUpperCase();
+                const date = new Date(noteDate);
+                if (isNaN(date.getTime())) return;
                 
-                // Clasificar por estado
-                if (status === 'DELIVERED') {
-                    revenueByStatus.DELIVERED += revenue;
-                    ordersByStatus.DELIVERED++;
-                } else if (status === 'PENDING' || status === 'PENDING_REVIEW' || status === 'IN_KITCHEN' || status === 'EN_ROUTE') {
-                    revenueByStatus.PENDING += revenue;
-                    ordersByStatus.PENDING++;
-                } else if (status === 'CANCELLED' || status === 'CANCELED') {
-                    revenueByStatus.CANCELLED += revenue;
-                    ordersByStatus.CANCELLED++;
+                // Comparar solo la fecha (sin hora) con la fecha objetivo
+                const noteDateStr = date.toISOString().slice(0, 10);
+                if (noteDateStr === targetDateStr) {
+                    dpNoteMatches++;
+                    console.log("Found matching dp_note:", { id: note.id, status: note.current_status, createdDate: noteDate, noteDateStr });
+                    const revenue = Number(note.monto_total || note.total_amount || 0);
+                    const status = (note.current_status || note.status)?.toUpperCase();
+                    
+                    // Clasificar por estado
+                    if (status === 'DELIVERED') {
+                        revenueByStatus.DELIVERED += revenue;
+                        ordersByStatus.DELIVERED++;
+                    } else if (status === 'PENDING' || status === 'PENDING_REVIEW' || status === 'IN_KITCHEN' || status === 'EN_ROUTE') {
+                        revenueByStatus.PENDING += revenue;
+                        ordersByStatus.PENDING++;
+                    } else if (status === 'CANCELLED' || status === 'CANCELED') {
+                        revenueByStatus.CANCELLED += revenue;
+                        ordersByStatus.CANCELLED++;
+                    }
+                    
+                    totalRevenue += revenue;
+                    totalOrders++;
                 }
-                
-                totalRevenue += revenue;
-                totalOrders++;
             }
         });
+        console.log("Matching dp_notes count:", dpNoteMatches);
     } catch (e) { 
         console.warn("Error fetching dp_notes from Delivery:", e.message); 
     }
@@ -203,6 +242,7 @@ export const getSummary = async (filters) => {
     try {
         const previousDate = new Date(targetDate);
         previousDate.setDate(previousDate.getDate() - 1);
+        previousDate.setHours(0, 0, 0, 0); // Normalizar a inicio del día
         const previousDateStr = previousDate.toISOString().slice(0, 10);
         
         let previousRevenue = 0;
@@ -317,7 +357,9 @@ export const getSummary = async (filters) => {
                        progressPct >= 50 ? "AT_RISK" : "OFF_TRACK";
 
     // 7. Calcular ticket promedio y distribución por estados
+    console.log("Before ticket average calculation:", { totalRevenue, totalOrders });
     const averageTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+    console.log("Calculated average ticket:", averageTicket);
     
     // Calcular distribución porcentual por estados - usar totalRevenue como base para que coincida
     const statusDistribution = {
@@ -488,7 +530,6 @@ export const getSummaryRange = async (filters) => {
                 } else if ((comanda.status === 'PENDING' || comanda.status === 'CANCELLED' || comanda.status === 'CANCELED') && comanda.sent_at) {
                     date = new Date(comanda.sent_at);
                 }
-                console.log(date)
                 // Calcular revenue usando precios base de productos
                 const lines = comanda.items || comanda.order_lines || [];
                 if (Array.isArray(lines)) {
@@ -587,7 +628,6 @@ export const getSummaryRange = async (filters) => {
                 
                 const date = new Date(noteDate);
                 if (isNaN(date.getTime())) return;
-                console.log(date)
                 const revenue = Number(note.monto_total || 0);
                 
                 // Filtrar por rango de fechas - normalizar fechas para comparación correcta
