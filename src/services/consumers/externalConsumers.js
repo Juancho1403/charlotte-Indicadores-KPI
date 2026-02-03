@@ -145,6 +145,7 @@ export async function fetchRecetaByProductId(productId) {
   if (envs.USE_MOCK_SERVICES) return mock.fetchRecetas({ product_id: productId });
   const url = `${envs.KDS_BASE_URL}/products/${productId}/recipe`;
   const res = await axiosJson.get(url);
+  console.log(res)
   return res.data;
 }
 

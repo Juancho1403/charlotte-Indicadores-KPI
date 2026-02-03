@@ -69,12 +69,12 @@ export const getStaffRanking = async (filters) => {
             
             // Calcular efficiency_score (0-100)
             // Fórmula simplificada: más órdenes y menos tiempo = mejor score
-            let efficiencyScore = 50; // Base
+            let efficiencyScore = 0; // Base
             if (totalOrders > 0) {
                 efficiencyScore += Math.min(totalOrders * 0.5, 30); // Bonus por volumen
             }
             if (avgTimeMinutes > 0 && avgTimeMinutes < 10) {
-                efficiencyScore += Math.max(0, 20 - avgTimeMinutes * 2); // Bonus por velocidad
+                efficiencyScore += Math.max(0, 90 - avgTimeMinutes * 2); // Bonus por velocidad
             }
             efficiencyScore = Math.min(100, Math.max(0, Math.round(efficiencyScore)));
             

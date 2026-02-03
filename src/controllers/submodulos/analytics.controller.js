@@ -39,3 +39,13 @@ export async function getTopProducts(req, res) {
     res.status(500).json({ error: 'Failed to fetch top products' });
   }
 }
+
+export async function getIngredientFrequency(req, res) {
+  try {
+    const result = await kpiService.getIngredientFrequency(req.query);
+    res.json(result);
+  } catch (err) {
+    console.error('getIngredientFrequency error', err);
+    res.status(500).json({ error: 'Failed to fetch ingredient frequency' });
+  }
+}
