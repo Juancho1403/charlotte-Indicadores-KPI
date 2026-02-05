@@ -300,7 +300,7 @@ export const getSummary = async (filters) => {
             console.warn("Error fetching previous dp_notes:", e.message);
         }
         
-        // Calcular porcentaje de cambio
+        // Calcular porcentaje de cambio basado en revenue del día (no en acumulado trimestral)
         if (previousRevenue > 0) {
             changePercentage = ((totalRevenue - previousRevenue) / previousRevenue) * 100;
             trendDirection = changePercentage > 0 ? 'up' : changePercentage < 0 ? 'down' : 'flat';
@@ -324,12 +324,14 @@ export const getSummary = async (filters) => {
                 const closedAt = new Date(c.closed_at || c.closedAt);
                 const minutes = minutesBetween(createdAt, closedAt);
                 
-                // Excluir outliers: > 240 min (4 horas) o valores inválidos
-                if (minutes > 0 && minutes <= 240) {
+                // Excluir outliers: > 30 min (tiempo máximo razonable) o valores inválidos
+                if (minutes > 0 && minutes <= 30) {
                     serviceTimes.push(minutes);
                 }
             }
         });
+        
+        console.log(`Service time calculation: found ${serviceTimes.length} valid times out of ${clientes.length} records`);
         
         if (serviceTimes.length > 0) {
             // Calcular promedio
@@ -345,8 +347,181 @@ export const getSummary = async (filters) => {
     }
 
 
-    // Para quarterly goal, acumulado desde inicio del trimestre hasta la fecha pedida
-    const acumulado = totalRevenue;
+    // Calcular acumulado trimestral (desde inicio del trimestre hasta fecha seleccionada)
+    // Usar exactamente la misma lógica que getSummaryRange
+    let quarterlyRevenue = 0;
+    try {
+        console.log("Calculating quarterly revenue from", quarterlyStartDateStr, "to", targetDateStr);
+        
+        // Crear estructura para acumular datos trimestrales por día (igual que getSummaryRange)
+        const quarterlyDataStructure = {};
+        
+        // Obtener datos de comandas y productos (igual que getSummaryRange)
+        const [comandasData, productsData] = await Promise.all([
+            fetchComandas({}),
+            fetchProducts({})
+        ]);
+        const comandas = Array.isArray(comandasData) ? comandasData : (comandasData?.data || []);
+        const products = Array.isArray(productsData) ? productsData : (productsData?.data || []);
+
+        // Crear mapeo de precios base de productos (igual que getSummaryRange)
+        const productPrices = {};
+        products.forEach(p => {
+            const id = String(p.id || p.product_id || '');
+            if (id) {
+                productPrices[id] = p.basePrice || p.base_price || 0;
+            }
+        });
+        
+        // Procesar cada comanda para calcular revenue con precios base (igual que getSummaryRange)
+        for (const comanda of comandas) {
+            // Incluir comandas en estados DELIVERED, PENDING y CANCELLED
+            // Usar sent_at para PENDING y CANCELLED, delivered_at para DELIVERED
+            const isValidStatus = comanda.status === 'DELIVERED' || 
+                                comanda.status === 'PENDING' || 
+                                comanda.status === 'CANCELLED' || 
+                                comanda.status === 'CANCELED';
+            
+            if (isValidStatus) {
+                let date;
+                let comandaRevenue = 0;
+                let hasValidItems = false;
+                
+                if (comanda.status === 'DELIVERED' && comanda.delivered_at) {
+                    date = new Date(comanda.delivered_at);
+                } else if ((comanda.status === 'PENDING' || comanda.status === 'CANCELLED' || comanda.status === 'CANCELED') && comanda.sent_at) {
+                    date = new Date(comanda.sent_at);
+                }
+                
+                // Calcular revenue usando precios base de productos (igual que getSummaryRange)
+                const lines = comanda.items || comanda.order_lines || [];
+                if (Array.isArray(lines)) {
+                    for (const line of lines) {
+                        const qty = parseFloat(line.qty || line.quantity || 0);
+                        let productId = String(line.product_id || '');
+                        
+                        // Si el product_name tiene formato "Producto #id", extraer el ID
+                        const extractedId = extractProductIdFromName(line.product_name || '');
+                        if (extractedId) {
+                            productId = extractedId;
+                        }
+                        
+                        // Obtener precio base del producto
+                        let basePrice = 0;
+                        if (productId && productPrices[productId]) {
+                            basePrice = productPrices[productId];
+                        } else if (productId) {
+                            // Si no está en el mapeo, intentar obtenerlo individualmente
+                            try {
+                                const product = await fetchProductById(productId);
+                                basePrice = product?.data?.basePrice || product?.data?.base_price || 0;
+                                productPrices[productId] = basePrice; // Cache
+                            } catch (error) {
+                                console.warn(`Error fetching product ${productId}:`, error.message);
+                                basePrice = 0;
+                            }
+                        }
+                        
+                        // Calcular subtotal usando precio base
+                        const subtotal = basePrice * qty;
+                        comandaRevenue += subtotal;
+                        hasValidItems = true;
+                    }
+                }
+                
+                // Si no hay items con precios válidos, usar el total original como fallback
+                if (!hasValidItems) {
+                    comandaRevenue = Number(comanda.total || comanda.monto_total || 0);
+                }
+                
+                // Filtrar por rango trimestral y acumular en dataStructure (igual lógica que getSummaryRange)
+                if (date) {
+                    // Normalizar fecha a inicio del día para comparación
+                    const normalizedDate = new Date(date);
+                    normalizedDate.setHours(0, 0, 0, 0);
+                    
+                    // Normalizar quarterlyStartDate y targetDate para comparación
+                    const normalizedStart = new Date(quarterlyStartDate);
+                    normalizedStart.setHours(0, 0, 0, 0);
+                    const normalizedEnd = new Date(targetDate);
+                    normalizedEnd.setHours(0, 0, 0, 0);
+                    
+                    // Verificar que la fecha esté dentro del rango trimestral
+                    if (normalizedDate >= normalizedStart && normalizedDate <= normalizedEnd) {
+                        const dateStr = date.toISOString().slice(0, 10);
+                        if (!quarterlyDataStructure[dateStr]) {
+                            quarterlyDataStructure[dateStr] = { revenue: 0, orders: 0 };
+                        }
+                        quarterlyDataStructure[dateStr].revenue += comandaRevenue;
+                        quarterlyDataStructure[dateStr].orders += 1;
+                    }
+                }
+            }
+        }
+        
+        // Obtener datos de delivery/pickup (igual que getSummaryRange)
+        try {
+            const dpNotesData = await fetchDpNotes({});
+            const dpNotes = Array.isArray(dpNotesData) ? dpNotesData : (dpNotesData?.data || []);
+            
+            dpNotes.forEach(note => {
+                // Incluir pedidos en estados EN_ROUTE, PENDING_REVIEW, IN_KITCHEN y CANCELLED
+                // Además de los estados que ya se incluían
+                const isValidStatus = note.current_status === 'EN_ROUTE' || 
+                                    note.current_status === 'PENDING_REVIEW' || 
+                                    note.current_status === 'IN_KITCHEN' || 
+                                    note.current_status === 'CANCELLED' || 
+                                    note.current_status === 'CANCELED' ||
+                                    note.current_status === 'DELIVERED'; // Mantener los entregados
+                
+                if (isValidStatus) {
+                    const noteDate = note.created_at || note.timestamp_creation || '';
+                    if (!noteDate) return;
+                    
+                    const date = new Date(noteDate);
+                    if (isNaN(date.getTime())) return;
+                    const revenue = Number(note.monto_total || note.total_amount || 0);
+                    
+                    // Filtrar por rango trimestral y acumular en dataStructure (igual lógica que getSummaryRange)
+                    if (date) {
+                        // Normalizar fecha a inicio del día para comparación
+                        const normalizedDate = new Date(date);
+                        normalizedDate.setHours(0, 0, 0, 0);
+                        
+                        // Normalizar quarterlyStartDate y targetDate para comparación
+                        const normalizedStart = new Date(quarterlyStartDate);
+                        normalizedStart.setHours(0, 0, 0, 0);
+                        const normalizedEnd = new Date(targetDate);
+                        normalizedEnd.setHours(0, 0, 0, 0);
+                        
+                        // Verificar que la fecha esté dentro del rango trimestral
+                        if (normalizedDate >= normalizedStart && normalizedDate <= normalizedEnd) {
+                            const dateStr = date.toISOString().slice(0, 10);
+                            if (!quarterlyDataStructure[dateStr]) {
+                                quarterlyDataStructure[dateStr] = { revenue: 0, orders: 0 };
+                            }
+                            quarterlyDataStructure[dateStr].revenue += revenue;
+                            quarterlyDataStructure[dateStr].orders += 1;
+                        }
+                    }
+                }
+            });
+        } catch (e) {
+            console.warn("Error fetching dp_notes:", e.message);
+        }
+        
+        // Calcular el total trimestral usando la misma lógica que getSummaryRange
+        const quarterlyRevenueArray = Object.keys(quarterlyDataStructure).map(date => quarterlyDataStructure[date].revenue);
+        quarterlyRevenue = quarterlyRevenueArray.reduce((a, b) => a + b, 0);
+        
+        console.log("Quarterly revenue calculated:", quarterlyRevenue, "from", Object.keys(quarterlyDataStructure).length, "days");
+    } catch (e) {
+        console.warn("Error calculating quarterly revenue:", e.message);
+        quarterlyRevenue = totalRevenue; // Fallback al revenue del día
+    }
+
+    // Para quarterly goal, usar el acumulado trimestral calculado
+    const acumulado = quarterlyRevenue;
     const progressPct = target > 0 ? (acumulado / target) * 100 : 0;
 
     // 6. Determinar UI Status basado en umbrales (dp_thresholds)
@@ -385,7 +560,7 @@ export const getSummary = async (filters) => {
         timestamp: new Date().toISOString(),
         data: {
             revenue: {
-                total: totalRevenue,
+                total: acumulado, // Usar el acumulado trimestral en lugar del revenue del día
                 currency: "USD",
                 trend_percentage: parseFloat(changePercentage.toFixed(1)),
                 trend_direction: trendDirection,
@@ -568,7 +743,7 @@ export const getSummaryRange = async (filters) => {
                 
                 // Si no hay items con precios válidos, usar el total original como fallback
                 if (!hasValidItems) {
-                    comandaRevenue = Number(comanda.total || 0);
+                    comandaRevenue = Number(comanda.total || comanda.monto_total || 0);
                 }
                 
                 // Filtrar por rango de fechas - normalizar fechas para comparación correcta
@@ -628,7 +803,7 @@ export const getSummaryRange = async (filters) => {
                 
                 const date = new Date(noteDate);
                 if (isNaN(date.getTime())) return;
-                const revenue = Number(note.monto_total || 0);
+                const revenue = Number(note.monto_total || note.total_amount || 0);
                 
                 // Filtrar por rango de fechas - normalizar fechas para comparación correcta
                 if (date) {
@@ -755,7 +930,7 @@ export const getSummaryRange = async (filters) => {
                 const previousComandasData = await fetchComandas({});
                 const previousComandas = Array.isArray(previousComandasData) ? previousComandasData : (previousComandasData?.data || []);
                 
-                previousComandas.forEach(comanda => {
+                for (const comanda of previousComandas) {
                     const isValidStatus = comanda.status === 'DELIVERED' || 
                                         comanda.status === 'PENDING' || 
                                         comanda.status === 'CANCELLED' || 
@@ -763,12 +938,49 @@ export const getSummaryRange = async (filters) => {
                     
                     if (isValidStatus) {
                         let date;
-                        let revenue = Number(comanda.total || 0);
+                        let revenue = 0;
+                        let hasValidItems = false;
                         
                         if (comanda.status === 'DELIVERED' && comanda.delivered_at) {
                             date = new Date(comanda.delivered_at);
                         } else if ((comanda.status === 'PENDING' || comanda.status === 'CANCELLED' || comanda.status === 'CANCELED') && comanda.sent_at) {
                             date = new Date(comanda.sent_at);
+                        }
+                        
+                        // Calcular revenue usando precios base de productos (misma lógica que en el resto)
+                        const lines = comanda.items || comanda.order_lines || [];
+                        if (Array.isArray(lines)) {
+                            for (const line of lines) {
+                                const qty = parseFloat(line.qty || line.quantity || 0);
+                                let productId = String(line.product_id || '');
+                                
+                                const extractedId = extractProductIdFromName(line.product_name || '');
+                                if (extractedId) {
+                                    productId = extractedId;
+                                }
+                                
+                                let basePrice = 0;
+                                if (productId && productPrices[productId]) {
+                                    basePrice = productPrices[productId];
+                                } else if (productId) {
+                                    try {
+                                        const product = await fetchProductById(productId);
+                                        basePrice = product?.data?.basePrice || product?.data?.base_price || 0;
+                                        productPrices[productId] = basePrice;
+                                    } catch (error) {
+                                        basePrice = 0;
+                                    }
+                                }
+                                
+                                const subtotal = basePrice * qty;
+                                revenue += subtotal;
+                                hasValidItems = true;
+                            }
+                        }
+                        
+                        // Si no hay items con precios válidos, usar el total original como fallback
+                        if (!hasValidItems) {
+                            revenue = Number(comanda.total || comanda.monto_total || 0);
                         }
                         
                         if (date && !isNaN(date.getTime())) {
@@ -803,7 +1015,7 @@ export const getSummaryRange = async (filters) => {
                             }
                         }
                     }
-                });
+                }
             } catch (e) {
                 console.warn("Error fetching previous comandas:", e.message);
             }
@@ -828,7 +1040,7 @@ export const getSummaryRange = async (filters) => {
                         const date = new Date(noteDate);
                         if (isNaN(date.getTime())) return;
                         
-                        const revenue = Number(note.monto_total || 0);
+                        const revenue = Number(note.monto_total || note.total_amount || 0);
 
                         if (date) {
                             // Normalizar fecha a inicio del día para comparación
